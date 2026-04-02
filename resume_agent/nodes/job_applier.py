@@ -28,8 +28,6 @@ async def apply_job_node(state: AgentState) -> dict:
             ApplicationResult(
                 job=job,
                 status=ApplicationStatus.SKIPPED,
-                resume_pdf_path=tailored.pdf_path,
-                resume_docx_path=tailored.docx_path,
                 notes="Dry run — not submitted",
             )
         )
@@ -55,10 +53,8 @@ async def apply_job_node(state: AgentState) -> dict:
             raise ValueError(f"Unknown platform: {job.platform}")
 
         platform = platform_cls()
-        result = await platform.apply(job=job, resume_pdf_path=tailored.pdf_path or "")
+        result = await platform.apply(job=job)
 
-        result.resume_pdf_path = tailored.pdf_path
-        result.resume_docx_path = tailored.docx_path
         applications.append(result)
         logger.info(f"[JobApplier] Applied successfully: {result.status}")
 
@@ -71,8 +67,6 @@ async def apply_job_node(state: AgentState) -> dict:
                 job=job,
                 status=ApplicationStatus.FAILED,
                 applied_at=datetime.utcnow(),
-                resume_pdf_path=tailored.pdf_path,
-                resume_docx_path=tailored.docx_path,
                 error=str(e),
             )
         )

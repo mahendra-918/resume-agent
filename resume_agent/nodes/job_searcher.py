@@ -19,8 +19,7 @@ async def _search_platform(platform: Any, query: str) -> list[Job]:
 
 
 async def search_jobs_node(state: AgentState) -> dict:
-    queries: list[str] = state["search_queries"]
-    query = queries[0] if queries else "software engineer intern"
+    queries: list[str] = state["search_queries"] or ["software engineer intern"]
 
     from resume_agent.platforms.linkedin import LinkedInPlatform
     from resume_agent.platforms.internshala import IntershalaPlatform
@@ -36,19 +35,20 @@ async def search_jobs_node(state: AgentState) -> dict:
 
     active_platforms = [cls() for enabled, cls in platform_map if enabled]
     logger.info(
-        f"[JobSearcher] Searching {len(active_platforms)} platforms with query: {query!r}"
+        f"[JobSearcher] Searching {len(active_platforms)} platforms × {len(queries)} queries"
     )
 
-    async def safe_search(platform: Any) -> list[Job]:
+    async def safe_search(platform: Any, query: str) -> list[Job]:
         try:
             results = await _search_platform(platform, query)
-            logger.info(f"[JobSearcher] {platform.name}: {len(results)} results")
+            logger.info(f"[JobSearcher] {platform.name} ({query!r}): {len(results)} results")
             return results
         except Exception as e:
-            logger.warning(f"[JobSearcher] {platform.name} failed: {e}")
+            logger.warning(f"[JobSearcher] {platform.name} ({query!r}) failed: {e}")
             return []
 
-    results_per_platform = await asyncio.gather(*[safe_search(p) for p in active_platforms])
+    tasks = [safe_search(p, q) for p in active_platforms for q in queries]
+    results_per_platform = await asyncio.gather(*tasks)
 
     seen: set[str] = set()
     jobs: list[Job] = []

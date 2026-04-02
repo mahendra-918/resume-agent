@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException
@@ -47,8 +48,6 @@ class ApplicationOut(BaseModel):
     status: str
     relevance_score: float
     applied_at: Optional[str] = None
-    resume_pdf_path: Optional[str] = None
-    resume_docx_path: Optional[str] = None
     error: Optional[str] = None
     notes: Optional[str] = None
 
@@ -70,8 +69,6 @@ def _app_to_out(app_result) -> ApplicationOut:  # type: ignore[no-untyped-def]
         applied_at=(
             app_result.applied_at.isoformat() if app_result.applied_at else None
         ),
-        resume_pdf_path=app_result.resume_pdf_path,
-        resume_docx_path=app_result.resume_docx_path,
         error=app_result.error,
         notes=app_result.notes,
     )
@@ -79,9 +76,24 @@ def _app_to_out(app_result) -> ApplicationOut:  # type: ignore[no-untyped-def]
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
 
+_ALLOWED_EXTENSIONS = {".md", ".pdf", ".docx"}
+
+
 @app.post("/run", response_model=RunResponse)
 async def start_run(request: RunRequest) -> RunResponse:
     """Launch the full agent pipeline in the background."""
+    path = Path(request.resume_path)
+    if path.suffix.lower() not in _ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type '{path.suffix}'. Allowed: {_ALLOWED_EXTENSIONS}",
+        )
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Resume file not found: {request.resume_path}",
+        )
+
     from resume_agent.graph.pipeline import run_pipeline
 
     async def _run() -> None:

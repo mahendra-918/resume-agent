@@ -33,8 +33,6 @@ CREATE TABLE IF NOT EXISTS applications (
     missing_skills  TEXT,
     status          TEXT    NOT NULL,
     applied_at      TEXT,
-    resume_pdf_path TEXT,
-    resume_docx_path TEXT,
     error           TEXT,
     notes           TEXT
 )
@@ -67,8 +65,8 @@ async def save_application(result: ApplicationResult) -> None:
             INSERT INTO applications (
                 job_title, company, job_url, platform, job_type, location,
                 relevance_score, matched_skills, missing_skills,
-                status, applied_at, resume_pdf_path, resume_docx_path, error, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                status, applied_at, error, notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 job.title,
@@ -82,8 +80,6 @@ async def save_application(result: ApplicationResult) -> None:
                 json.dumps(job.missing_skills),
                 result.status.value,
                 result.applied_at.isoformat() if result.applied_at else None,
-                result.resume_pdf_path,
-                result.resume_docx_path,
                 result.error,
                 result.notes,
             ),
@@ -118,8 +114,6 @@ def _row_to_result(row: aiosqlite.Row) -> ApplicationResult:
         job=job,
         status=ApplicationStatus(row["status"]),
         applied_at=applied_at,
-        resume_pdf_path=row["resume_pdf_path"],
-        resume_docx_path=row["resume_docx_path"],
         error=row["error"],
         notes=row["notes"],
     )

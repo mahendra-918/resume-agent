@@ -90,8 +90,6 @@ class TailoredResume(BaseModel):
     reordered_projects: list[ResumeProject] = []
     reordered_experience: list[ResumeExperience] = []
     added_keywords: list[str] = []
-    pdf_path: Optional[str] = None
-    docx_path: Optional[str] = None
 
 
 # ── Job Models ─────────────────────────────────────────────────────────────────
@@ -118,7 +116,5 @@ class ApplicationResult(BaseModel):
     job: Job
     status: ApplicationStatus
     applied_at: Optional[datetime] = None
-    resume_pdf_path: Optional[str] = None
-    resume_docx_path: Optional[str] = None
     error: Optional[str] = None
     notes: Optional[str] = None

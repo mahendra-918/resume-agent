@@ -34,8 +34,11 @@ async def rank_jobs_node(state: AgentState) -> dict:
     candidate_skills = parsed.skills.all_skills()
     candidate_experience = ""
     if parsed.experience:
-        first = parsed.experience[0]
-        candidate_experience = f"{first.title} at {first.org}: " + "; ".join(first.highlights[:3])
+        parts = []
+        for exp in parsed.experience[:4]:
+            highlights = "; ".join(exp.highlights[:2])
+            parts.append(f"{exp.title} at {exp.org}: {highlights}")
+        candidate_experience = " | ".join(parts)
 
     logger.info(f"[JobRanker] Ranking {len(jobs)} jobs...")
     ranked = await asyncio.gather(*[

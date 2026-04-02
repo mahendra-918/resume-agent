@@ -13,7 +13,6 @@ from resume_agent.nodes.query_generator import generate_queries_node
 from resume_agent.nodes.job_searcher import search_jobs_node
 from resume_agent.nodes.job_ranker import rank_jobs_node
 from resume_agent.nodes.resume_tailor import tailor_resume_node
-from resume_agent.nodes.resume_generator import generate_resume_node
 from resume_agent.nodes.job_applier import apply_job_node
 
 
@@ -88,7 +87,6 @@ def _build_graph() -> StateGraph:
     g.add_node("rank_jobs", rank_jobs_node)
     g.add_node("process_next_job", process_next_job_node)
     g.add_node("tailor_resume", tailor_resume_node)
-    g.add_node("generate_documents", generate_resume_node)
     g.add_node("apply_to_job", apply_job_node)
     g.add_node("save_application", save_application_node)
     g.add_node("print_summary", print_summary_node)
@@ -99,8 +97,7 @@ def _build_graph() -> StateGraph:
     g.add_edge("search_jobs", "rank_jobs")
     g.add_conditional_edges("rank_jobs", _has_jobs)
     g.add_edge("process_next_job", "tailor_resume")
-    g.add_edge("tailor_resume", "generate_documents")
-    g.add_edge("generate_documents", "apply_to_job")
+    g.add_edge("tailor_resume", "apply_to_job")
     g.add_edge("apply_to_job", "save_application")
     g.add_conditional_edges("save_application", _more_jobs)
     g.add_edge("print_summary", END)

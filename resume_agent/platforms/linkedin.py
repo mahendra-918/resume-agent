@@ -42,7 +42,7 @@ class LinkedInPlatform(BasePlatform):
             logger.error(f"[LinkedIn] Search failed: {e}")
             raise JobSearchError(f"LinkedIn search failed: {e}") from e
 
-    async def apply(self, job: Job, resume_pdf_path: str) -> ApplicationResult:
+    async def apply(self, job: Job) -> ApplicationResult:
         logger.info(f"[LinkedIn] Applying to: {job.title} at {job.company}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -68,12 +68,6 @@ class LinkedInPlatform(BasePlatform):
                 await easy_apply.click()
                 await asyncio.sleep(1)
 
-                # Upload resume if file upload field exists
-                file_input = page.locator("input[type='file']").first
-                if await file_input.is_visible():
-                    await file_input.set_input_files(resume_pdf_path)
-                    await asyncio.sleep(1)
-
                 # Click through multi-step form
                 for _ in range(5):
                     next_btn = page.locator("button:has-text('Next')").first
@@ -87,7 +81,6 @@ class LinkedInPlatform(BasePlatform):
                             job=job,
                             status=ApplicationStatus.APPLIED,
                             applied_at=datetime.now(),
-                            resume_pdf_path=resume_pdf_path,
                         )
                     elif await review_btn.is_visible():
                         await review_btn.click()

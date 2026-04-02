@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     NAUKRI_EMAIL: str = ""
     NAUKRI_PASSWORD: str = ""
 
+    # ── Wellfound ─────────────────────────────────────────────────────────────
+    WELLFOUND_EMAIL: str = ""
+    WELLFOUND_PASSWORD: str = ""
+
     # ── Job Search ────────────────────────────────────────────────────────────
     JOB_LOCATION: str = "Bangalore, India"
     JOB_TYPE: JobType = JobType.INTERNSHIP
@@ -44,10 +48,14 @@ class Settings(BaseSettings):
     # ── Output ────────────────────────────────────────────────────────────────
     OUTPUT_DIR: str = "./output/resumes"
     DB_PATH: str = "./output/applications_log.db"
+    CHECKPOINT_DB_PATH: str = "./output/checkpoints.db"
 
     # ── Browser ───────────────────────────────────────────────────────────────
     HEADLESS: bool = True
     BROWSER_SLOW_MO: int = Field(default=500, ge=0)
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    LOG_LEVEL: str = "INFO"
 
 
 settings = Settings()

@@ -13,8 +13,8 @@ class BasePlatform(ABC):
         ...
 
     @abstractmethod
-    async def apply(self, job: Job, resume_pdf_path: str) -> ApplicationResult:
-        """Apply to a job using the tailored resume PDF."""
+    async def apply(self, job: Job) -> ApplicationResult:
+        """Apply to a job."""
         ...
 
     def __repr__(self) -> str:

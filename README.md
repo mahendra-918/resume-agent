@@ -91,13 +91,13 @@ INTERNSHALA_PASSWORD=yourpassword
 Search, rank, tailor resumes, and generate PDF/DOCX — but do **not** submit anything:
 
 ```bash
-uv run python -m resume_agent.main dry-run --resume ./my_resume.md
+uv run resume-agent dry-run --resume ./my_resume.md
 ```
 
 ### Full run
 
 ```bash
-uv run python -m resume_agent.main run --resume ./my_resume.md
+uv run resume-agent run --resume ./my_resume.md
 ```
 
 Options:
@@ -106,12 +106,11 @@ Options:
 |------|---------|-------------|
 | `--resume` | required | Path to your resume (.md, .pdf, or .docx) |
 | `--max` | 20 | Maximum number of applications to submit |
-| `--dry-run` | false | Skip actual submissions |
 
 ### Check application history
 
 ```bash
-uv run python -m resume_agent.main status
+uv run resume-agent status
 ```
 
 Output:
@@ -128,6 +127,8 @@ Total: 2
 
 ### REST API
 
+Start the backend server for the React dashboard:
+
 ```bash
 uv run uvicorn resume_agent.api:app --reload
 ```
@@ -137,16 +138,38 @@ uv run uvicorn resume_agent.api:app --reload
 | POST | `/run` | Start the agent in the background |
 | GET | `/status` | All applications |
 | GET | `/status/{platform}` | Filter by platform |
+| DELETE | `/applications` | Clear history |
 | GET | `/health` | Health check |
 
-**POST /run body:**
+---
 
-```json
-{
-  "resume_path": "./my_resume.md",
-  "dry_run": false,
-  "max_applications": 20
-}
+## Frontend Dashboard
+
+A modern React-based UI to trigger runs and monitor progress in real-time.
+
+### Setup
+
+```bash
+cd frontend
+npm install
+```
+
+### Usage
+
+```bash
+npm run dev
+```
+
+The dashboard will be available at `http://localhost:5173`. It connects to the REST API at `http://localhost:8000`.
+
+---
+
+## Docker Support
+
+Run the entire stack (Backend + Frontend) using Docker:
+
+```bash
+docker-compose up --build
 ```
 
 ---

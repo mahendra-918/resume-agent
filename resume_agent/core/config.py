@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     OUTPUT_DIR: str = "./output/resumes"
     DB_PATH: str = "./output/applications_log.db"
     CHECKPOINT_DB_PATH: str = "./output/checkpoints.db"
+    SESSIONS_DIR: str = "./output/sessions"   # saved browser sessions per platform
 
     # ── Browser ───────────────────────────────────────────────────────────────
     HEADLESS: bool = True

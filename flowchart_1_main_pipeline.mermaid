@@ -1,0 +1,48 @@
+---
+title: Resume Agent — Main Pipeline Flowchart (LangGraph StateGraph)
+---
+flowchart TD
+    A([▶ START\nrun_pipeline called]) --> B
+
+    B["📄 parse_resume_node\nRead .md / .pdf / .docx file\nSend raw text to Groq LLM\nGet back structured ParsedResume JSON"]
+
+    B --> C["🔍 generate_queries_node\nGroq LLM reads target_roles + top_skills\nGenerates 3–5 job search query strings\ne.g. 'Python backend engineer intern Bangalore'"]
+
+    C --> D["🌐 search_jobs_node\nRun all queries × all enabled platforms in parallel\nasyncio.gather — LinkedIn, Internshala, Naukri, Wellfound\nDe-duplicate by title+company\nReturn combined list → jobs_found"]
+
+    D --> E["⭐ rank_jobs_node\nFor each job in jobs_found:\nSend candidate skills + job description to Groq LLM\nGet relevance_score 0.0–1.0\nFilter out jobs below MIN_RELEVANCE_SCORE\nSort by score → jobs_filtered"]
+
+    E --> F{jobs_filtered\nempty?}
+
+    F -- "No jobs found" --> Z
+
+    F -- "Jobs available" --> G["📋 process_next_job_node\nPick jobs_filtered at current_job_index\nSet current_job in state\nIncrement current_job_index"]
+
+    G --> H["✏️ tailor_resume_node\nSend ParsedResume + Job description to Groq LLM\nLLM rewrites summary, re-ranks skills/projects\nAdds ATS keywords for this specific job\nReturns TailoredResume object"]
+
+    H --> I["🤖 apply_job_node\nCheck dry_run flag\nIf dry_run → status = SKIPPED\nElse → load platform class\nPlaywright opens browser\nCheck for saved session cookie file\nIf session exists → load cookies\nElse → auto-login → save session\nFill form → click Submit\nStatus = APPLIED or FAILED"]
+
+    I --> J["💾 save_application_node\nTake latest ApplicationResult from state\nFlatten Job + result into one DB row\nWrite to applications.db via aiosqlite\nAsyncSqliteSaver also checkpoints AgentState"]
+
+    J --> K{More jobs\nremaining?}
+
+    K -- "current_job_index < len(jobs_filtered)" --> G
+    K -- "All jobs done" --> L
+
+    L["📊 print_summary_node\nCount applied / skipped / failed\nLog summary to terminal\nPipeline complete"]
+
+    L --> Z([⏹ END])
+
+    style A fill:#1F4E79,color:#fff,stroke:#1F4E79
+    style Z fill:#1F4E79,color:#fff,stroke:#1F4E79
+    style B fill:#4C1D95,color:#fff,stroke:#6D28D9
+    style C fill:#4C1D95,color:#fff,stroke:#6D28D9
+    style D fill:#065F46,color:#fff,stroke:#047857
+    style E fill:#065F46,color:#fff,stroke:#047857
+    style F fill:#92400E,color:#fff,stroke:#B45309
+    style G fill:#1E40AF,color:#fff,stroke:#1D4ED8
+    style H fill:#4C1D95,color:#fff,stroke:#6D28D9
+    style I fill:#991B1B,color:#fff,stroke:#B91C1C
+    style J fill:#065F46,color:#fff,stroke:#047857
+    style K fill:#92400E,color:#fff,stroke:#B45309
+    style L fill:#374151,color:#fff,stroke:#4B5563

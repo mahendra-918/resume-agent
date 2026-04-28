@@ -53,7 +53,7 @@ class WellfoundPlatform(BasePlatform):
             logger.error(f"[Wellfound] Search failed: {e}")
             raise JobSearchError(f"Wellfound search failed: {e}") from e
 
-    async def apply(self, job: Job) -> ApplicationResult:
+    async def apply(self, job: Job, resume_path: str | None = None) -> ApplicationResult:
         logger.info(f"[Wellfound] Applying to: {job.title} at {job.company}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(
@@ -78,9 +78,9 @@ class WellfoundPlatform(BasePlatform):
 
                 return ApplicationResult(
                     job=job,
-                    status=ApplicationStatus.APPLIED,
-                    applied_at=datetime.now(),
-                )
+                        status=ApplicationStatus.APPLIED,
+                        applied_at=datetime.now(),
+                    )
 
             except Exception as e:
                 logger.error(f"[Wellfound] Apply failed: {e}")

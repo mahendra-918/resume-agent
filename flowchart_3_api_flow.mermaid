@@ -1,0 +1,54 @@
+---
+title: Resume Agent — API & Frontend Request Flow
+---
+flowchart LR
+    subgraph BROWSER["🖥️ React Frontend (Vite — port 5173)"]
+        U1["User fills Run Page\nresume_path, dry_run\nmax_applications\nfrom Settings localStorage"]
+        U2["Click ▶ Start Run"]
+        U3["POST /api/run\nAxios call\nVite proxies to :8000"]
+        U4["Show 'Pipeline started'\ntoast notification"]
+        U5["User clicks Refresh\non Status Page"]
+        U6["GET /api/status\nAxios call"]
+        U7["Render applications table\nstatus chips — applied/skipped/failed\nrelevance score bars"]
+    end
+
+    subgraph API["⚡ FastAPI Backend (uvicorn — port 8000)"]
+        A1["POST /run endpoint\nValidate RunRequest\nPydantic BaseModel\nCheck file extension\nCheck file exists"]
+        A2["asyncio.create_task\nStart pipeline in background\nReturn immediately"]
+        A3["RunResponse\nstatus: started\nmessage: Agent running"]
+        A4["GET /status endpoint\nCall get_all_applications\nfrom db.repository"]
+        A5["Convert ApplicationResult\nlist to ApplicationOut\nlist via _app_to_out"]
+        A6["Return JSON array\nof ApplicationOut objects"]
+    end
+
+    subgraph PIPELINE["🔄 LangGraph Pipeline (Background Task)"]
+        P1["run_pipeline called\nInitialise AgentState"]
+        P2["Graph nodes execute\nparse → query → search\n→ rank → tailor → apply"]
+        P3["save_application_node\nWrite each result to DB"]
+    end
+
+    subgraph DB["🗄️ SQLite Database"]
+        D1[("applications.db\napplications table")]
+        D2[("checkpoints.db\nAgentState snapshots")]
+    end
+
+    U1 --> U2 --> U3 --> A1
+    A1 -- "400: bad file type" --> U4
+    A1 -- "404: file not found" --> U4
+    A1 -- Valid --> A2
+    A2 --> A3 --> U4
+    A2 -.->|"background task"| P1
+    P1 --> P2 --> P3
+    P3 --> D1
+    P2 -.->|"checkpoint after\nevery node"| D2
+
+    U5 --> U6 --> A4
+    A4 --> D1
+    D1 --> A5 --> A6 --> U7
+
+    style BROWSER fill:#1E3A5F,color:#fff
+    style API fill:#1F4E79,color:#fff
+    style PIPELINE fill:#4C1D95,color:#fff
+    style DB fill:#065F46,color:#fff
+    style A2 fill:#92400E,color:#fff
+    style P3 fill:#065F46,color:#fff

@@ -1,0 +1,67 @@
+flowchart TD
+    subgraph ENTRY["Entry Layer"]
+        CLI["Typer CLI\nrun / dry-run / status"]
+        API["FastAPI REST API\nPOST /run · GET /status"]
+        FE["React Frontend\n/ · /run · /settings"]
+    end
+
+    subgraph PIPELINE["Orchestration — LangGraph StateGraph"]
+        N1["parse_resume_node\npdfplumber / python-docx / md"]
+        N2["generate_queries_node\nLLM → search_queries[]"]
+        N3["search_jobs_node\nasyncio.gather × platforms × queries"]
+        N4["rank_jobs_node\nasyncio.gather → LLM score each job"]
+        N5["process_next_job_node\ncurrent_job_index++"]
+        N6["tailor_resume_node\nLLM → TailoredResume"]
+        N7["apply_job_node\nplatform.apply() + doc gen"]
+        N8["save_application_node\nasync SQLite write"]
+        N9["print_summary_node\nlog stats"]
+    end
+
+    subgraph LLM["Intelligence Layer — Groq llama-3.3-70b"]
+        C1["resume_parse_chain"]
+        C2["query_generator_chain"]
+        C3["job_rank_chain\n(parallel per job)"]
+        C4["resume_tailor_chain"]
+    end
+
+    subgraph PLATFORMS["Platform Layer"]
+        P1["LinkedIn\npython-jobspy + Playwright"]
+        P2["Internshala\npython-jobspy + Playwright"]
+        P3["Naukri\npython-jobspy + Playwright"]
+        P4["Wellfound\npython-jobspy + Playwright"]
+    end
+
+    subgraph DATA["Data Layer"]
+        DB1["applications_log.db\nSQLite — aiosqlite"]
+        DB2["checkpoints.db\nLangGraph AsyncSqliteSaver"]
+        FS["output/resumes/\nPDF + DOCX files"]
+    end
+
+    FE -->|"axios POST /api/run"| API
+    CLI --> N1
+    API -->|"asyncio.create_task"| N1
+
+    N1 -->|"resume_raw + parsed_resume"| N2
+    N1 <-->|"LLM call"| C1
+    N2 <-->|"LLM call"| C2
+    N2 -->|"search_queries[]"| N3
+    N3 -->|"parallel search"| P1 & P2 & P3 & P4
+    P1 & P2 & P3 & P4 -->|"jobs_found[]"| N4
+    N4 <-->|"LLM call × N jobs"| C3
+    N4 -->|"jobs_filtered[] sorted desc"| N5
+    N5 -->|"current_job"| N6
+    N6 <-->|"LLM call"| C4
+    N6 -->|"tailored_resume"| N7
+    N7 -->|"apply via Playwright"| P1
+    N7 -->|"apply via Playwright"| P2
+    N7 -->|"apply via Playwright"| P3
+    N7 -->|"apply via Playwright"| P4
+    N7 -->|"PDF + DOCX"| FS
+    N7 -->|"ApplicationResult"| N8
+    N8 -->|"persist"| DB1
+    N8 -->|"checkpoint after each node"| DB2
+    N8 -->|"loop or done"| N5
+    N8 -->|"all done"| N9
+
+    API -->|"GET /status"| DB1
+    FE -->|"axios GET /api/status"| API

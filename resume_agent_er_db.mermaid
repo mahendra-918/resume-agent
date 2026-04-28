@@ -1,0 +1,56 @@
+---
+title: Resume Agent — Database ER Diagram (SQLite via aiosqlite)
+---
+erDiagram
+
+    applications {
+        INTEGER  id              PK  "AUTOINCREMENT primary key"
+        TEXT     job_title           "Job title scraped from platform"
+        TEXT     company             "Company name"
+        TEXT     job_url             "Direct link to the job post"
+        TEXT     platform            "linkedin | internshala | naukri | wellfound"
+        TEXT     job_type            "internship | full_time | both"
+        TEXT     location            "City or Remote (nullable)"
+        REAL     relevance_score     "LLM score 0.0 – 1.0"
+        TEXT     matched_skills      "JSON array e.g. [Python, FastAPI]"
+        TEXT     missing_skills      "JSON array of skills the user lacks"
+        TEXT     status              "pending | applied | skipped | failed"
+        TEXT     applied_at          "ISO-8601 datetime (nullable)"
+        TEXT     error               "Error message if status=failed (nullable)"
+        TEXT     notes               "Extra info e.g. dry_run skipped (nullable)"
+    }
+
+    %% ── LangGraph Checkpoint Tables (managed by AsyncSqliteSaver) ───────────────
+    checkpoints {
+        TEXT     thread_id       PK  "LangGraph thread / run ID"
+        TEXT     checkpoint_ns       "Namespace (usually empty string)"
+        TEXT     checkpoint_id   PK  "UUID of this checkpoint"
+        TEXT     parent_checkpoint_id "Previous checkpoint UUID (nullable)"
+        TEXT     type                "Serialisation type"
+        BLOB     checkpoint          "Serialised AgentState snapshot"
+        BLOB     metadata            "Extra metadata blob"
+    }
+
+    checkpoint_blobs {
+        TEXT     thread_id       PK
+        TEXT     checkpoint_ns   PK
+        TEXT     channel         PK  "State channel name e.g. jobs_found"
+        TEXT     version         PK  "Channel version number"
+        TEXT     type                "Serialisation type"
+        BLOB     blob                "Serialised value for this channel"
+    }
+
+    checkpoint_writes {
+        TEXT     thread_id       PK
+        TEXT     checkpoint_ns   PK
+        TEXT     checkpoint_id   PK
+        TEXT     task_id         PK  "Node task that wrote this"
+        INTEGER  idx             PK  "Write index within task"
+        TEXT     channel             "State channel name"
+        TEXT     type                "Serialisation type"
+        BLOB     value               "Serialised write value"
+    }
+
+    %% ── Relationships ──────────────────────────────────────────────────────────
+    checkpoints          ||--|{  checkpoint_blobs   : "stores channel values for"
+    checkpoints          ||--|{  checkpoint_writes  : "records writes from"

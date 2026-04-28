@@ -1,0 +1,46 @@
+---
+title: Resume Agent — Data Flow (How Data Transforms Across Pipeline)
+---
+flowchart TD
+    RAW["📄 Raw Resume File\n.md / .pdf / .docx\nPlain text on disk"]
+
+    RAW -->|"read file\nextract text"| TEXT["resume_raw: str\nUnstructured text blob\nstored in AgentState"]
+
+    TEXT -->|"Chain 1\nGroq LLM parses"| PR["ParsedResume\nname, email, skills\nexperience list\nprojects list\neducation list\ntarget_roles"]
+
+    PR -->|"Chain 2\nGroq LLM generates"| QS["search_queries: list\n'Python ML intern'\n'FastAPI backend Bangalore'\n3–5 query strings"]
+
+    QS -->|"python-jobspy\nasyncio.gather\nall platforms parallel"| JF["jobs_found: list of Job\nRaw scraped jobs\nLinkedIn + Internshala\nNaukri + Wellfound\nMay have 80–200 jobs"]
+
+    JF -->|"Chain 3 — per job\nGroq LLM scores each"| JR["jobs_filtered: list of Job\nEach Job now has:\nrelevance_score: float\nmatched_skills: list\nmissing_skills: list\nFiltered: score >= 0.6"]
+
+    JR -->|"process_next_job\npick one job at a time"| CJ["current_job: Job\nSingle job being processed"]
+
+    CJ & PR -->|"Chain 4\nGroq LLM rewrites"| TR["TailoredResume\nbase = ParsedResume\ntailored_summary\nhighlighted_skills\nreordered_projects\nadded_keywords ATS"]
+
+    TR -->|"WeasyPrint + Jinja2"| PDF["tailored_resume.pdf\nSaved to output/resumes/\nUploaded to apply form"]
+
+    TR -->|"python-docx"| DOCX["tailored_resume.docx\nSaved to output/resumes/\nAlternate format"]
+
+    CJ & TR -->|"Playwright\nbrowser automation"| AR["ApplicationResult\njob = current_job\nstatus = applied/skipped/failed\napplied_at datetime\nerror if failed"]
+
+    AR -->|"aiosqlite INSERT\nflatten to 14 columns"| DB[("applications table\nSQLite row\nFlat denormalised record\nqueried by GET /status")]
+
+    AR -->|"append to list"| APPS["applications: list\nAll results accumulated\nin AgentState\nduring this run"]
+
+    APPS -->|"AsyncSqliteSaver\nafter every node"| CK[("checkpoints.db\nSerialized AgentState\nCrash recovery snapshot")]
+
+    style RAW fill:#374151,color:#fff
+    style TEXT fill:#374151,color:#fff
+    style PR fill:#4C1D95,color:#fff
+    style QS fill:#4C1D95,color:#fff
+    style JF fill:#065F46,color:#fff
+    style JR fill:#065F46,color:#fff
+    style CJ fill:#1E40AF,color:#fff
+    style TR fill:#4C1D95,color:#fff
+    style PDF fill:#92400E,color:#fff
+    style DOCX fill:#92400E,color:#fff
+    style AR fill:#991B1B,color:#fff
+    style DB fill:#065F46,color:#fff
+    style APPS fill:#1E40AF,color:#fff
+    style CK fill:#1F4E79,color:#fff

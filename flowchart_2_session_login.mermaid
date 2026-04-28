@@ -1,0 +1,64 @@
+---
+title: Resume Agent — Session Persistence & Login Flow (Playwright)
+---
+flowchart TD
+    A([apply_job_node called\nfor a specific platform]) --> B
+
+    B["Get platform class\ne.g. LinkedInPlatform\nfrom platform_map dict"]
+
+    B --> C["async with async_playwright as pw\nasync with pw.chromium.launch\nheadless = settings.HEADLESS\nCreate BrowserContext"]
+
+    C --> D{_session_exists?\nCheck if\nplatform_session.json\nfile exists on disk}
+
+    D -- "File exists ✅" --> E["_load_session\nRead JSON file\nCall context.add_cookies\nwith saved cookies\nUser appears already logged in"]
+
+    D -- "No file ❌" --> F["Open new page\nNavigate to platform login URL\nFill email + password from .env\nClick login button\nWait for home page"]
+
+    F --> G["_save_session\nCall context.storage_state\nReturns all cookies + localStorage\nWrite to platform_session.json"]
+
+    G --> H["Login session saved\nfor future runs"]
+
+    E --> I["Open new page\nNavigate to job URL\npage.goto job.url"]
+
+    H --> I
+
+    I --> J{Check page URL\nafter navigation}
+
+    J -- "Contains 'login'\nor 'authwall'" --> K["Session expired!\n_delete_session\nDelete platform_session.json\nLogin fresh with credentials\n_save_session again"]
+
+    K --> L
+
+    J -- "Job page loaded ✅" --> L["Find Apply button\npage.query_selector\nApply Now / Easy Apply"]
+
+    L --> M{Apply button\nfound?}
+
+    M -- "Not found" --> N["status = SKIPPED\nnotes = 'No Apply button'\nReturn ApplicationResult"]
+
+    M -- "Found ✅" --> O["Fill application form\nUpload PDF resume\nFill name, email, phone\nAnswer screening questions\nClick Submit / Send Application"]
+
+    O --> P{Submit\nsucceeded?}
+
+    P -- "Exception raised" --> Q["status = FAILED\nerror = exception message\nReturn ApplicationResult"]
+
+    P -- "Success ✅" --> R["status = APPLIED\napplied_at = datetime.utcnow\nReturn ApplicationResult"]
+
+    N --> S([Return to\napply_job_node])
+    Q --> S
+    R --> S
+
+    style A fill:#1F4E79,color:#fff
+    style S fill:#1F4E79,color:#fff
+    style D fill:#92400E,color:#fff
+    style J fill:#92400E,color:#fff
+    style M fill:#92400E,color:#fff
+    style P fill:#92400E,color:#fff
+    style E fill:#065F46,color:#fff
+    style F fill:#991B1B,color:#fff
+    style G fill:#065F46,color:#fff
+    style H fill:#065F46,color:#fff
+    style K fill:#991B1B,color:#fff
+    style N fill:#374151,color:#fff
+    style Q fill:#991B1B,color:#fff
+    style R fill:#065F46,color:#fff
+    style O fill:#1E40AF,color:#fff
+    style L fill:#1E40AF,color:#fff

@@ -1,0 +1,106 @@
+---
+title: Resume Agent — Domain Model ER Diagram (Pydantic / In-Memory)
+---
+erDiagram
+
+    ParsedResume {
+        string  name
+        string  email
+        string  phone
+        string  location
+        string  portfolio
+        string  linkedin
+        string  github
+        string  summary
+        list    target_roles
+        list    achievements
+    }
+
+    ResumeSkills {
+        list  languages
+        list  frameworks
+        list  ml_ai
+        list  cloud_devops
+        list  databases
+        list  tools
+    }
+
+    ResumeExperience {
+        string  title
+        string  org
+        string  duration
+        list    highlights
+    }
+
+    ResumeProject {
+        string  name
+        list    tech_stack
+        string  description
+        list    highlights
+    }
+
+    ResumeEducation {
+        string  degree
+        string  institution
+        string  duration
+        string  gpa
+    }
+
+    TailoredResume {
+        string  job_title
+        string  company
+        string  tailored_summary
+        list    highlighted_skills
+        list    added_keywords
+    }
+
+    Job {
+        string    id
+        string    title
+        string    company
+        string    location
+        string    description
+        string    url
+        enum      platform
+        enum      job_type
+        string    salary
+        datetime  posted_at
+        float     relevance_score
+        list      matched_skills
+        list      missing_skills
+    }
+
+    ApplicationResult {
+        enum      status
+        datetime  applied_at
+        string    error
+        string    notes
+    }
+
+    AgentState {
+        string  resume_path
+        string  resume_raw
+        list    search_queries
+        int     current_job_index
+        bool    dry_run
+        int     max_applications
+        list    errors
+    }
+
+    %% ── Relationships ──────────────────────────────────────────────────────────
+    ParsedResume     ||--||     ResumeSkills      : "has (embedded)"
+    ParsedResume     ||--|{     ResumeExperience   : "has many"
+    ParsedResume     ||--|{     ResumeProject      : "has many"
+    ParsedResume     ||--|{     ResumeEducation    : "has many"
+
+    TailoredResume   ||--||     ParsedResume       : "based on (base)"
+    TailoredResume   ||--|{     ResumeProject      : "reordered_projects"
+    TailoredResume   ||--|{     ResumeExperience   : "reordered_experience"
+
+    ApplicationResult ||--||    Job               : "records result of"
+
+    AgentState       ||--o|     ParsedResume       : "parsed_resume"
+    AgentState       ||--o|     TailoredResume     : "tailored_resume"
+    AgentState       ||--o|     Job                : "current_job"
+    AgentState       ||--|{     Job                : "jobs_found / jobs_filtered"
+    AgentState       ||--|{     ApplicationResult  : "applications"

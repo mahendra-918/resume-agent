@@ -1,0 +1,76 @@
+sequenceDiagram
+    actor User
+    participant FE as React Frontend
+    participant API as FastAPI
+    participant Graph as LangGraph Pipeline
+    participant Groq as Groq LLM
+    participant JobSpy as python-jobspy
+    participant PW as Playwright
+    participant DB as SQLite
+
+    User->>FE: Fill resume path + settings<br/>Click "Start Run"
+    FE->>API: POST /api/run {resume_path, dry_run, settings}
+    API-->>FE: 200 { status: "started" }
+    API->>Graph: asyncio.create_task(run_pipeline(...))
+
+    Note over Graph: NODE 1 — parse_resume
+    Graph->>Graph: Read file (pdfplumber/docx/md)
+    Graph->>Groq: RESUME_PARSE_PROMPT + resume_text
+    Groq-->>Graph: JSON → ParsedResume
+
+    Note over Graph: NODE 2 — generate_queries
+    Graph->>Groq: QUERY_GENERATOR_PROMPT + roles/skills
+    Groq-->>Graph: list[str] search_queries
+
+    Note over Graph: NODE 3 — search_jobs (parallel)
+    par LinkedIn × queries
+        Graph->>JobSpy: search(query, location, job_type)
+        JobSpy-->>Graph: list[Job]
+    and Internshala × queries
+        Graph->>JobSpy: search(query, location, job_type)
+        JobSpy-->>Graph: list[Job]
+    and Naukri × queries
+        Graph->>JobSpy: search(query, location, job_type)
+        JobSpy-->>Graph: list[Job]
+    and Wellfound × queries
+        Graph->>JobSpy: search(query, location, job_type)
+        JobSpy-->>Graph: list[Job]
+    end
+    Graph->>Graph: Merge → jobs_found[]
+
+    Note over Graph: NODE 4 — rank_jobs (asyncio.gather)
+    loop For each job in parallel
+        Graph->>Groq: JOB_RANK_PROMPT + skills + job_description
+        Groq-->>Graph: {relevance_score, matched_skills, missing_skills}
+    end
+    Graph->>Graph: Filter score >= 0.6, sort desc, cap at MAX_APPLICATIONS
+
+    Note over Graph: LOOP — per job
+    loop For each job in jobs_filtered
+        Graph->>Graph: process_next_job (index++)
+
+        Note over Graph: NODE 6 — tailor_resume
+        Graph->>Groq: RESUME_TAILOR_PROMPT + job + resume_json
+        Groq-->>Graph: TailoredResume (summary, skills, projects reordered)
+
+        Note over Graph: NODE 7 — apply_job
+        Graph->>PW: launch_browser → login → navigate to job URL
+        PW->>PW: Fill application form
+        PW-->>Graph: ApplicationResult (applied/failed/skipped)
+        Graph->>Graph: generate PDF + DOCX (WeasyPrint + python-docx)
+
+        Note over Graph: NODE 8 — save_application
+        Graph->>DB: INSERT INTO applications (...)
+        DB-->>Graph: OK
+        Graph->>DB: Save checkpoint (AsyncSqliteSaver)
+    end
+
+    Note over Graph: NODE 9 — print_summary
+    Graph->>Graph: Log applied/skipped/failed counts
+
+    User->>FE: Navigate to Status page
+    FE->>API: GET /api/status
+    API->>DB: SELECT * FROM applications
+    DB-->>API: rows
+    API-->>FE: list[ApplicationOut]
+    FE-->>User: Table with status badges + scores

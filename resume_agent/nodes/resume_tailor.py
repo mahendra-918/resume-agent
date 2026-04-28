@@ -5,12 +5,17 @@ from loguru import logger
 from resume_agent.core.models import Job, ParsedResume, ResumeProject, ResumeExperience, TailoredResume
 from resume_agent.core.state import AgentState
 from resume_agent.llm.chains import run_resume_tailor_chain
+from resume_agent.utils.pdf_generator import generate_tailored_pdf
 
 
 async def tailor_resume_node(state: AgentState) -> dict:
     job: Job = state["current_job"]
-    parsed: ParsedResume = state["parsed_resume"]
 
+    # Duplicate skip: process_next_job set current_job to None for already-applied jobs
+    if job is None:
+        return {}
+
+    parsed: ParsedResume = state["parsed_resume"]
     logger.info(f"[ResumeTailor] Tailoring for {job.title} @ {job.company}")
 
     try:
@@ -41,7 +46,11 @@ async def tailor_resume_node(state: AgentState) -> dict:
             added_keywords=result.get("added_keywords", []),
         )
 
-        logger.info(f"[ResumeTailor] Done — {len(tailored.added_keywords)} keywords added")
+        # Generate physical PDF
+        pdf_path = await generate_tailored_pdf(tailored)
+        tailored.file_path = pdf_path
+
+        logger.info(f"[ResumeTailor] Done — PDF generated at {pdf_path}")
         return {"tailored_resume": tailored}
 
     except Exception as e:

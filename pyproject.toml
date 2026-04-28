@@ -19,9 +19,11 @@ dependencies = [
     "pydantic-settings>=2.13.1",
     "python-dotenv>=1.2.2",
     "python-jobspy>=1.1.82",
+    "python-multipart>=0.0.26",
     "sqlalchemy>=2.0.48",
     "typer>=0.24.1",
     "uvicorn>=0.42.0",
+    "websockets>=16.0",
 ]
 
 [project.scripts]

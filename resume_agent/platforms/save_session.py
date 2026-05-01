@@ -80,7 +80,7 @@ async def _save_session_for(platform: str) -> None:
         page = await context.new_page()
 
         # Navigate to login page
-        await page.goto(login_url, wait_until="networkidle")
+        await page.goto(login_url, wait_until="domcontentloaded")
         logger.info(f"Browser opened: {login_url}")
 
         # Wait for user to manually log in
@@ -88,9 +88,10 @@ async def _save_session_for(platform: str) -> None:
 
         # Verify login succeeded by checking current URL
         current_url = page.url
-        if "login" in current_url or "signin" in current_url:
+        success_indicators = ("/feed", "/mynetwork", "/jobs", "/home")
+        if not any(ind in current_url for ind in success_indicators):
             logger.warning(
-                f"  ⚠  It looks like you may still be on the login page ({current_url})."
+                f"  ⚠  It looks like you may not be fully logged in yet ({current_url})."
             )
             proceed = input("  Are you sure you're logged in? (y/n): ").strip().lower()
             if proceed != "y":

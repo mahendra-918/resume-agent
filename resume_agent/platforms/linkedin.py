@@ -1,33 +1,73 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 
 from jobspy import scrape_jobs
+from jobspy.model import Country
 from loguru import logger
-from playwright.async_api import Page, async_playwright
 
 from resume_agent.core.config import settings
-from resume_agent.core.exceptions import ApplicationError, JobSearchError, PlatformLoginError
-from resume_agent.core.models import (
-    ApplicationResult, ApplicationStatus, Job, JobType, Platform,
-)
+from resume_agent.core.exceptions import JobSearchError
+from resume_agent.core.models import Job, JobType, Platform
 from resume_agent.platforms.base import BasePlatform
+
+
+def _country_indeed(location: str) -> str:
+    """Map a free-form location string to a jobspy country_indeed value.
+
+    Falls back to 'worldwide' for unrecognised or remote locations so that
+    LinkedIn searches never raise 'Invalid country string'.
+    """
+    loc = location.lower().strip()
+
+    # Explicit remote / worldwide shortcut — must come before alias loop
+    # to prevent short country aliases (e.g. "lb" for Lebanon) matching
+    # inside words like "remote" or "anywhere".
+    if not loc or loc in ("remote", "worldwide", "anywhere", "work from home", "wfh"):
+        return "worldwide"
+
+    for country in Country:
+        for alias in country.value[0].split(","):
+            alias = alias.strip()
+            # Only match aliases that are at least 4 chars long AND appear as
+            # a whole word in the location string to avoid false positives.
+            if len(alias) >= 4 and alias in loc:
+                return alias
+    return "worldwide"
 
 
 class LinkedInPlatform(BasePlatform):
     name = "linkedin"
     async def search(self, query: str, location: str, job_type: str) -> list[Job]:
         logger.info(f"[LinkedIn] Searching: '{query}' in '{location}'")
+        country = _country_indeed(location)
+        logger.debug(f"[LinkedIn] Resolved country_indeed='{country}' from location='{location}'")
         try:
+            # Try with easy_apply=True first (gets only Easy Apply jobs).
+            # If that returns nothing, fall back to all jobs so the pipeline
+            # still has something to rank and package.
             df = await asyncio.to_thread(
                 scrape_jobs,
                 site_name=["linkedin"],
                 search_term=query,
                 location=location,
+                country_indeed=country,
                 results_wanted=settings.RESULTS_PER_PLATFORM,
                 job_type="internship" if job_type == JobType.INTERNSHIP else "fulltime",
+                easy_apply=True,
             )
+
+            if df is None or df.empty:
+                logger.warning(f"[LinkedIn] easy_apply=True returned 0 — retrying without filter")
+                df = await asyncio.to_thread(
+                    scrape_jobs,
+                    site_name=["linkedin"],
+                    search_term=query,
+                    location=location,
+                    country_indeed=country,
+                    results_wanted=settings.RESULTS_PER_PLATFORM,
+                    job_type="internship" if job_type == JobType.INTERNSHIP else "fulltime",
+                )
             import pandas as pd
             jobs = []
             for _, row in df.iterrows():
@@ -51,109 +91,3 @@ class LinkedInPlatform(BasePlatform):
             logger.error(f"[LinkedIn] Search failed: {e}")
             raise JobSearchError(f"LinkedIn search failed: {e}") from e
 
-
-    async def apply(self, job: Job, resume_path: str | None = None) -> ApplicationResult:
-        logger.info(f"[LinkedIn] Applying to: {job.title} at {job.company}")
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=settings.HEADLESS,
-                slow_mo=settings.BROWSER_SLOW_MO,
-            )
-            context = await browser.new_context()
-
-            try:
-                if self._session_exists():
-                    await self._load_session(context)
-                    logger.info("[LinkedIn] Using saved session — skipping login")
-                else:
-                    page = await context.new_page()
-                    await self._login(page)
-                    await self._save_session(context)
-                    await page.close()
-
-                page = await context.new_page()
-                await page.goto(job.url, wait_until="networkidle")
-                await asyncio.sleep(2)
-
-                
-                if "login" in page.url or "authwall" in page.url:
-                    logger.warning("[LinkedIn] Session expired — re-logging in")
-                    self._delete_session()
-                    await self._login(page)
-                    await self._save_session(context)
-                    await page.goto(job.url, wait_until="networkidle")
-                    await asyncio.sleep(2)
-
-                # ── Click Easy Apply ───────────────────────────────────────────
-                easy_apply = page.locator("button:has-text('Easy Apply')").first
-                if not await easy_apply.is_visible():
-                    return ApplicationResult(
-                        job=job,
-                        status=ApplicationStatus.SKIPPED,
-                        notes="No Easy Apply button found",
-                    )
-
-                await easy_apply.click()
-                await asyncio.sleep(1)
-
-                # ── Step through multi-page form ───────────────────────────────
-                for _ in range(5):
-                    # Upload resume if we see a file input on the current modal page
-                    if resume_path:
-                        file_input = page.locator("input[type='file']").first
-                        if await file_input.is_visible():
-                            logger.info(f"[LinkedIn] Uploading tailored resume: {resume_path}")
-                            await file_input.set_input_files(resume_path)
-                            await asyncio.sleep(2)  # Wait for upload to complete
-
-                    submit_btn = page.locator("button:has-text('Submit application')").first
-                    review_btn = page.locator("button:has-text('Review')").first
-                    next_btn   = page.locator("button:has-text('Next')").first
-
-                    if await submit_btn.is_visible():
-                        await submit_btn.click()
-                        logger.success(f"[LinkedIn] Applied: {job.title} at {job.company}")
-                        return ApplicationResult(
-                            job=job,
-                            status=ApplicationStatus.APPLIED,
-                            applied_at=datetime.now(),
-                        )
-                    elif await review_btn.is_visible():
-                        await review_btn.click()
-                    elif await next_btn.is_visible():
-                        await next_btn.click()
-                    else:
-                        break
-                    await asyncio.sleep(1)
-
-                return ApplicationResult(
-                    job=job,
-                    status=ApplicationStatus.FAILED,
-                    notes="Could not complete application form",
-                )
-
-            except Exception as e:
-                logger.error(f"[LinkedIn] Apply failed: {e}")
-                raise ApplicationError(f"LinkedIn apply failed: {e}") from e
-            finally:
-                await browser.close()
-
-    # ── Login (used only when no session exists) ───────────────────────────────
-
-    async def _login(self, page: Page) -> None:
-        if not settings.LINKEDIN_EMAIL or not settings.LINKEDIN_PASSWORD:
-            raise PlatformLoginError("LinkedIn credentials not set in .env")
-
-        await page.goto("https://www.linkedin.com/login", wait_until="networkidle")
-        await page.fill("#username", settings.LINKEDIN_EMAIL)
-        await page.fill("#password", settings.LINKEDIN_PASSWORD)
-        await page.click("button[type='submit']")
-        await asyncio.sleep(3)
-
-        if "checkpoint" in page.url or "login" in page.url:
-            raise PlatformLoginError(
-                "LinkedIn login failed — possible CAPTCHA or OTP. "
-                "Run: uv run python -m resume_agent.platforms.save_session --platform linkedin"
-            )
-        logger.info("[LinkedIn] Logged in successfully")

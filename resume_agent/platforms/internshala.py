@@ -1,157 +1,47 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
 
-import httpx
-from bs4 import BeautifulSoup
 from loguru import logger
-from playwright.async_api import Page, async_playwright
 
 from resume_agent.core.config import settings
-from resume_agent.core.exceptions import ApplicationError, JobSearchError, PlatformLoginError
-from resume_agent.core.models import (
-    ApplicationResult, ApplicationStatus, Job, JobType, Platform,
-)
+from resume_agent.core.exceptions import JobSearchError
+from resume_agent.core.models import Job, JobType, Platform
 from resume_agent.platforms.base import BasePlatform
 
 
 class IntershalaPlatform(BasePlatform):
     name = "internshala"
-    BASE_URL = "https://internshala.com"
-
-    # ── Search ─────────────────────────────────────────────────────────────────
 
     async def search(self, query: str, location: str, job_type: str) -> list[Job]:
-        logger.info(f"[Internshala] Searching: '{query}'")
+        logger.info(f"[Internshala] Searching: '{query}' in '{location}'")
         try:
-            slug = query.lower().replace(" ", "-")
-            url = f"{self.BASE_URL}/internships/keywords-{slug}"
-            async with httpx.AsyncClient(follow_redirects=True) as client:
-                response = await client.get(url, headers={
-                    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                                  "AppleWebKit/537.36 (KHTML, like Gecko) "
-                                  "Chrome/120.0.0.0 Safari/537.36"
-                })
-            soup = BeautifulSoup(response.text, "html.parser")
-            cards = soup.select(".internship_meta")[: settings.RESULTS_PER_PLATFORM]
-
+            import pandas as pd
+            from jobspy import scrape_jobs
+            df = await asyncio.to_thread(
+                scrape_jobs,
+                site_name=["indeed"],
+                search_term=query + " internship" if job_type == JobType.INTERNSHIP else query,
+                location=location,
+                results_wanted=settings.RESULTS_PER_PLATFORM,
+            )
             jobs = []
-            for card in cards:
-                title_el   = card.select_one(".profile a")
-                company_el = card.select_one(".company_name a")
-                link_el    = card.select_one(".profile a")
-                desc_el    = card.select_one(".internship_other_details_container")
-                if not title_el:
-                    continue
-                job_url = self.BASE_URL + (link_el["href"] if link_el else "")
+            for _, row in df.iterrows():
+                posted = row.get("date_posted")
+                if pd.isna(posted):
+                    posted = None
                 jobs.append(Job(
-                    title=title_el.get_text(strip=True),
-                    company=company_el.get_text(strip=True) if company_el else "Unknown",
-                    location=location,
-                    description=desc_el.get_text(strip=True) if desc_el else "",
-                    url=job_url,
+                    title=str(row.get("title", "")),
+                    company=str(row.get("company", "")),
+                    location=str(row.get("location", "")),
+                    description=str(row.get("description", "")),
+                    url=str(row.get("job_url", "")),
                     platform=Platform.INTERNSHALA,
-                    job_type=JobType.INTERNSHIP,
+                    job_type=JobType.INTERNSHIP if job_type == JobType.INTERNSHIP else JobType.FULL_TIME,
+                    posted_at=posted,
                 ))
-            logger.info(f"[Internshala] Found {len(jobs)} internships")
+            logger.info(f"[Internshala] Found {len(jobs)} jobs")
             return jobs
         except Exception as e:
             logger.error(f"[Internshala] Search failed: {e}")
             raise JobSearchError(f"Internshala search failed: {e}") from e
-
-    # ── Apply ──────────────────────────────────────────────────────────────────
-
-    async def apply(self, job: Job, resume_path: str | None = None) -> ApplicationResult:
-        logger.info(f"[Internshala] Applying to: {job.title} at {job.company}")
-
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=settings.HEADLESS,
-                slow_mo=settings.BROWSER_SLOW_MO,
-            )
-            context = await browser.new_context()
-
-            try:
-                # ── Session check ──────────────────────────────────────────────
-                if self._session_exists():
-                    await self._load_session(context)
-                    logger.info("[Internshala] Using saved session — skipping login")
-                else:
-                    page = await context.new_page()
-                    await self._login(page)
-                    await self._save_session(context)
-                    await page.close()
-
-                # ── Navigate to job ────────────────────────────────────────────
-                page = await context.new_page()
-                await page.goto(job.url, wait_until="networkidle")
-                await asyncio.sleep(2)
-
-                # ── Check session still valid ──────────────────────────────────
-                if "login" in page.url:
-                    logger.warning("[Internshala] Session expired — re-logging in")
-                    self._delete_session()
-                    await self._login(page)
-                    await self._save_session(context)
-                    await page.goto(job.url, wait_until="networkidle")
-                    await asyncio.sleep(2)
-
-                # ── Click Apply ────────────────────────────────────────────────
-                apply_btn = page.locator(
-                    "a:has-text('Apply now'), button:has-text('Apply now')"
-                ).first
-                if not await apply_btn.is_visible():
-                    return ApplicationResult(
-                        job=job,
-                        status=ApplicationStatus.SKIPPED,
-                        notes="Apply button not found",
-                    )
-                await apply_btn.click()
-                await asyncio.sleep(2)
-
-                # ── Fill cover letter if present ───────────────────────────────
-                cover_letter = page.locator("textarea").first
-                if await cover_letter.is_visible():
-                    await cover_letter.fill(
-                        f"I am excited to apply for the {job.title} role at {job.company}. "
-                        f"My skills in Python, LangChain, and FastAPI align well with this opportunity."
-                    )
-
-                # ── Submit ─────────────────────────────────────────────────────
-                submit_btn = page.locator(
-                    "button:has-text('Submit'), input[value='Submit']"
-                ).first
-                if await submit_btn.is_visible():
-                    await submit_btn.click()
-                    logger.success(f"[Internshala] Applied: {job.title} at {job.company}")
-                    return ApplicationResult(
-                        job=job,
-                        status=ApplicationStatus.APPLIED,
-                        applied_at=datetime.now(),
-                    )
-
-                return ApplicationResult(
-                    job=job,
-                    status=ApplicationStatus.FAILED,
-                    notes="Could not submit application",
-                )
-
-            except Exception as e:
-                logger.error(f"[Internshala] Apply failed: {e}")
-                raise ApplicationError(f"Internshala apply failed: {e}") from e
-            finally:
-                await browser.close()
-
-    # ── Login (used only when no session exists) ───────────────────────────────
-
-    async def _login(self, page: Page) -> None:
-        if not settings.INTERNSHALA_EMAIL or not settings.INTERNSHALA_PASSWORD:
-            raise PlatformLoginError("Internshala credentials not set in .env")
-
-        await page.goto(f"{self.BASE_URL}/login", wait_until="networkidle")
-        await page.fill("#email", settings.INTERNSHALA_EMAIL)
-        await page.fill("#password", settings.INTERNSHALA_PASSWORD)
-        await page.click("#login_submit")
-        await asyncio.sleep(3)
-        logger.info("[Internshala] Logged in successfully")

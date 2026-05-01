@@ -56,6 +56,21 @@ async def parse_resume_node(state: AgentState) -> dict:
         skills_data = data.get("skills", {})
         skills = ResumeSkills(**skills_data) if isinstance(skills_data, dict) else ResumeSkills()
 
+        # Coerce achievements to plain strings — LLMs sometimes return dicts
+        # like {"title": "...", "description": "..."} instead of strings.
+        raw_achievements = data.get("achievements", [])
+        achievements: list[str] = []
+        for item in raw_achievements:
+            if isinstance(item, str):
+                achievements.append(item)
+            elif isinstance(item, dict):
+                # Prefer "title" key; fall back to joined values
+                title = item.get("title") or item.get("name") or ""
+                desc = item.get("description") or item.get("detail") or ""
+                achievements.append(f"{title}: {desc}".strip(": ") if desc else title or str(item))
+            else:
+                achievements.append(str(item))
+
         parsed = ParsedResume(
             name=data.get("name", ""),
             email=data.get("email", ""),
@@ -70,7 +85,7 @@ async def parse_resume_node(state: AgentState) -> dict:
             experience=data.get("experience", []),
             projects=data.get("projects", []),
             education=data.get("education", []),
-            achievements=data.get("achievements", []),
+            achievements=achievements,
         )
 
         logger.info(f"[ResumeParser] Parsed resume for: {parsed.name}")

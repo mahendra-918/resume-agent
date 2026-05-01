@@ -120,3 +120,16 @@ class ApplicationResult(BaseModel):
     error: Optional[str] = None
     notes: Optional[str] = None
     tailored_resume_path: Optional[str] = None
+
+
+class ApplicationPackage(BaseModel):
+    """Complete application package generated for a single job."""
+    job: Job
+    tailored_resume_path: Optional[str] = None
+    cover_letter: Optional[str] = None
+    cover_letter_path: Optional[str] = None
+    email_draft: Optional[str] = None
+    interview_prep: Optional[str] = None
+    output_dir: Optional[str] = None
+    generated_at: Optional[datetime] = None
+    error: Optional[str] = None

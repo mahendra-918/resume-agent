@@ -1,5 +1,6 @@
 import asyncio
 import json
+import re
 
 from loguru import logger
 
@@ -9,13 +10,63 @@ from resume_agent.llm.prompts import (
     QUERY_GENERATOR_PROMPT,
     JOB_RANK_PROMPT,
     RESUME_TAILOR_PROMPT,
+    COVER_LETTER_PROMPT,
+    EMAIL_DRAFT_PROMPT,
+    INTERVIEW_PREP_PROMPT,
 )
 from resume_agent.core.exceptions import LLMError
 
 
 def _parse_json(raw: str) -> dict | list:
-    """Strip markdown fences and parse JSON."""
+    """Strip markdown fences and parse JSON.
+
+    Handles:
+    - Markdown code fences (```json ... ```)
+    - Extra text / multiple JSON objects after the first valid one
+      (causes json.JSONDecodeError 'Extra data')
+    """
     raw = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+
+    # Fast path — clean JSON
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    # Slow path — LLM appended extra text; extract the first complete JSON
+    # object {...} or array [...] using a regex that handles nesting via
+    # a simple brace/bracket counter.
+    for start_char, end_char in [('{', '}'), ('[', ']')]:
+        idx = raw.find(start_char)
+        if idx == -1:
+            continue
+        depth = 0
+        in_str = False
+        escape = False
+        for i, ch in enumerate(raw[idx:], start=idx):
+            if escape:
+                escape = False
+                continue
+            if ch == '\\' and in_str:
+                escape = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == start_char:
+                depth += 1
+            elif ch == end_char:
+                depth -= 1
+                if depth == 0:
+                    candidate = raw[idx:i + 1]
+                    try:
+                        return json.loads(candidate)
+                    except json.JSONDecodeError:
+                        break  # try the other bracket type
+
+    # Last resort — let json.loads raise with the original error
     return json.loads(raw)
 
 
@@ -118,10 +169,80 @@ async def run_resume_tailor_chain(
         content = await _invoke_with_retry(chain, {
             "job_title": job_title,
             "company": company,
-            "job_description": job_description[:3000],
+            "job_description": job_description[:1200],
             "resume_json": resume_json,
         }, f"resume tailor ({job_title} @ {company})")
         return _parse_json(content)
     except Exception as e:
         logger.error(f"[LLM] Resume tailoring failed: {e}")
         raise LLMError(f"Resume tailoring failed: {e}") from e
+
+
+async def run_cover_letter_chain(
+    name: str,
+    job_title: str,
+    company: str,
+    job_description: str,
+    resume_summary: str,
+    skills: str,
+    projects: str,
+) -> str:
+    try:
+        chain = COVER_LETTER_PROMPT | get_llm()
+        content = await _invoke_with_retry(chain, {
+            "name": name,
+            "job_title": job_title,
+            "company": company,
+            "job_description": job_description[:2000],
+            "resume_summary": resume_summary,
+            "skills": skills,
+            "projects": projects,
+        }, f"cover letter ({job_title} @ {company})")
+        return content.strip()
+    except Exception as e:
+        logger.error(f"[LLM] Cover letter failed: {e}")
+        raise LLMError(f"Cover letter generation failed: {e}") from e
+
+
+async def run_email_draft_chain(
+    name: str,
+    job_title: str,
+    company: str,
+    skills: str,
+) -> str:
+    try:
+        chain = EMAIL_DRAFT_PROMPT | get_llm()
+        content = await _invoke_with_retry(chain, {
+            "name": name,
+            "job_title": job_title,
+            "company": company,
+            "skills": skills,
+        }, f"email draft ({job_title} @ {company})")
+        return content.strip()
+    except Exception as e:
+        logger.error(f"[LLM] Email draft failed: {e}")
+        raise LLMError(f"Email draft generation failed: {e}") from e
+
+
+async def run_interview_prep_chain(
+    job_title: str,
+    company: str,
+    job_description: str,
+    resume_summary: str,
+    skills: str,
+    projects: str,
+) -> str:
+    try:
+        chain = INTERVIEW_PREP_PROMPT | get_llm()
+        content = await _invoke_with_retry(chain, {
+            "job_title": job_title,
+            "company": company,
+            "job_description": job_description[:2000],
+            "resume_summary": resume_summary,
+            "skills": skills,
+            "projects": projects,
+        }, f"interview prep ({job_title} @ {company})")
+        return content.strip()
+    except Exception as e:
+        logger.error(f"[LLM] Interview prep failed: {e}")
+        raise LLMError(f"Interview prep generation failed: {e}") from e

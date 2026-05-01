@@ -12,25 +12,11 @@ class Settings(BaseSettings):
     )
 
     # ── LLM ───────────────────────────────────────────────────────────────────
-    GROQ_API_KEY: str
+    LLM_PROVIDER: str = "groq"          # "groq" | "gemini"
+    GROQ_API_KEY: str = ""
+    GEMINI_API_KEY: str = ""
     LLM_MODEL: str = "llama-3.3-70b-versatile"
     LLM_TEMPERATURE: float = 0.0
-
-    # ── LinkedIn ──────────────────────────────────────────────────────────────
-    LINKEDIN_EMAIL: str = ""
-    LINKEDIN_PASSWORD: str = ""
-
-    # ── Internshala ───────────────────────────────────────────────────────────
-    INTERNSHALA_EMAIL: str = ""
-    INTERNSHALA_PASSWORD: str = ""
-
-    # ── Naukri ────────────────────────────────────────────────────────────────
-    NAUKRI_EMAIL: str = ""
-    NAUKRI_PASSWORD: str = ""
-
-    # ── Wellfound ─────────────────────────────────────────────────────────────
-    WELLFOUND_EMAIL: str = ""
-    WELLFOUND_PASSWORD: str = ""
 
     # ── Job Search ────────────────────────────────────────────────────────────
     JOB_LOCATION: str = "Bangalore, India"
@@ -50,6 +36,10 @@ class Settings(BaseSettings):
     DB_PATH: str = "./output/applications_log.db"
     CHECKPOINT_DB_PATH: str = "./output/checkpoints.db"
     SESSIONS_DIR: str = "./output/sessions"   # saved browser sessions per platform
+
+    # ── LinkedIn credentials ──────────────────────────────────────────────────
+    LINKEDIN_EMAIL: str = ""
+    LINKEDIN_PASSWORD: str = ""
 
     # ── Browser ───────────────────────────────────────────────────────────────
     HEADLESS: bool = True

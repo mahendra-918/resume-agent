@@ -18,35 +18,21 @@ export async function getHealth() {
   }
 }
 
-export async function startRun({ resumePath, dryRun, settings }) {
+export async function startRun({ resumePath, settings, applyEnabled = false }) {
   const s = settings || {}
   try {
     const { data } = await client.post('/run', {
       resume_path: resumePath,
-      dry_run: dryRun,
-      // Job search preferences
       max_applications: s.maxApplications,
       min_relevance_score: s.minRelevanceScore,
       results_per_platform: s.resultsPerPlatform,
       job_location: s.jobLocation,
       job_type: s.jobType,
-      // Platform toggles
       use_linkedin: s.useLinkedIn,
       use_internshala: s.useInternshala,
       use_naukri: s.useNaukri,
       use_wellfound: s.useWellfound,
-      // Credentials
-      linkedin_email: s.linkedinEmail,
-      linkedin_password: s.linkedinPassword,
-      internshala_email: s.internshalaEmail,
-      internshala_password: s.internshalaPassword,
-      naukri_email: s.naukriEmail,
-      naukri_password: s.naukriPassword,
-      wellfound_email: s.wellfoundEmail,
-      wellfound_password: s.wellfoundPassword,
-      // Browser
-      headless: s.headless,
-      browser_slow_mo: s.browserSlowMo,
+      apply_enabled: applyEnabled,
     })
     // data = { run_id: "abc-123", status: "started", message: "..." }
     // run_id is what the caller needs to open the WebSocket

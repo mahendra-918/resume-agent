@@ -1,7 +1,9 @@
 from typing import TypedDict, Optional
 from resume_agent.core.models import (
-    ParsedResume, Job, TailoredResume, ApplicationResult
+    ParsedResume, Job, TailoredResume, ApplicationPackage,
 )
+
+PlatformStatus = dict  # {count: int, error: str | None, duration_ms: float}
 
 
 class AgentState(TypedDict):
@@ -21,8 +23,15 @@ class AgentState(TypedDict):
     tailored_resume: Optional[TailoredResume]
 
     # ── Results ───────────────────────────────────────────────────────────────
-    applications: list[ApplicationResult]
+    packages: list[ApplicationPackage]
     errors: list[str]
+
+    # ── Platform diagnostics ──────────────────────────────────────────────────
+    platform_status: dict[str, PlatformStatus]  # keyed by platform name
+
+    # ── Apply ─────────────────────────────────────────────────────────────────
+    apply_enabled: bool
+    apply_results: list[dict]
 
     # ── Control ───────────────────────────────────────────────────────────────
     dry_run: bool

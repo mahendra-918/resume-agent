@@ -4,6 +4,7 @@ import Navbar from './components/Navbar'
 import RunPage from './pages/RunPage'
 import SettingsPage from './pages/SettingsPage'
 import HistoryPage from './pages/HistoryPage'
+import TrackingPage from './pages/TrackingPage'
 import './App.css'
 
 // ── Shared run state lives here so it survives page navigation ────────────────
@@ -46,6 +47,7 @@ function App() {
         <Route path="/"        element={<HistoryPage isRunning={isRunning} />} />
         <Route path="/run"     element={<RunPage {...runProps} />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/tracker" element={<TrackingPage />} />
       </Routes>
     </BrowserRouter>
   )

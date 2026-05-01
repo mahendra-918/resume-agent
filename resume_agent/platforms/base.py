@@ -8,7 +8,7 @@ from loguru import logger
 from playwright.async_api import BrowserContext
 
 from resume_agent.core.config import settings
-from resume_agent.core.models import Job, ApplicationResult
+from resume_agent.core.models import Job
 
 
 class BasePlatform(ABC):
@@ -78,10 +78,6 @@ class BasePlatform(ABC):
 
     @abstractmethod
     async def search(self, query: str, location: str, job_type: str) -> list[Job]:
-        ...
-
-    @abstractmethod
-    async def apply(self, job: Job, resume_path: str | None = None) -> ApplicationResult:
         ...
 
     def __repr__(self) -> str:

@@ -70,18 +70,7 @@ app.mount("/tailored", StaticFiles(directory=str(_TAILORED_DIR)), name="tailored
 _PACKAGES_DIR = Path("output/packages")
 _PACKAGES_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── Serve built React frontend (production) ───────────────────────────────────
 _FRONTEND_BUILD = Path("frontend/dist")
-if _FRONTEND_BUILD.exists():
-    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_BUILD / "assets")), name="assets")
-
-    @app.get("/", include_in_schema=False)
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(full_path: str = ""):
-        index = _FRONTEND_BUILD / "index.html"
-        if index.exists():
-            from fastapi.responses import HTMLResponse
-            return HTMLResponse(index.read_text())
 app.mount("/packages-files", StaticFiles(directory=str(_PACKAGES_DIR)), name="packages")
 
 
@@ -676,3 +665,18 @@ async def websocket_endpoint(websocket: WebSocket, run_id: str) -> None:
     finally:
         if websocket in _ws_clients[run_id]:
             _ws_clients[run_id].remove(websocket)
+
+
+# ── Serve built React frontend (production) ───────────────────────────────────
+# IMPORTANT: must be registered LAST so it doesn't shadow API routes.
+if _FRONTEND_BUILD.exists():
+    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_BUILD / "assets")), name="assets")
+
+    @app.get("/", include_in_schema=False)
+    @app.get("/{full_path:path}", include_in_schema=False)
+    async def serve_spa(full_path: str = ""):
+        from fastapi.responses import HTMLResponse
+        index = _FRONTEND_BUILD / "index.html"
+        if index.exists():
+            return HTMLResponse(index.read_text())
+        return HTMLResponse("<h1>Frontend not built</h1>", status_code=503)

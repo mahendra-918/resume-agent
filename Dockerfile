@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y \
     build-essential gcc g++ make \
     libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 \
     libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 \
-    libgbm1 libasound2 libpango-1.0-0 libpangocairo-1.0-0 \
+    libgbm1 libasound2t64 libpango-1.0-0 libpangocairo-1.0-0 \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
     && rm -rf /var/lib/apt/lists/*
@@ -15,28 +15,17 @@ RUN pip install uv
 
 WORKDIR /app
 
-# ── Python deps ───────────────────────────────────────────────────────────────
-COPY pyproject.toml ./
-RUN uv pip install --system --no-cache -e . 2>/dev/null || \
-    uv pip install --system --no-cache \
-    aiosqlite beautifulsoup4 fastapi httpx \
-    langchain-core langchain-google-genai langchain-groq langchain-ollama \
-    langgraph langgraph-checkpoint-sqlite loguru pdfplumber playwright \
-    pydantic-settings python-dotenv python-jobspy python-multipart \
-    sqlalchemy typer uvicorn websockets
+# ── Copy everything first so editable install can find the package ────────────
+COPY . .
+
+# ── Python deps (editable install so resume_agent is importable) ──────────────
+RUN uv pip install --system --no-cache -e .
 
 # ── Playwright Chromium ───────────────────────────────────────────────────────
 RUN python -m playwright install chromium --with-deps
 
 # ── Frontend build ────────────────────────────────────────────────────────────
-COPY frontend/package*.json frontend/
-RUN cd frontend && npm ci
-
-COPY frontend/ frontend/
-RUN cd frontend && npm run build
-
-# ── App source ────────────────────────────────────────────────────────────────
-COPY . .
+RUN cd frontend && npm ci && npm run build
 
 RUN mkdir -p output/resumes output/packages output/tailored output/sessions
 

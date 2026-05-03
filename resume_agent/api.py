@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -668,15 +668,32 @@ async def websocket_endpoint(websocket: WebSocket, run_id: str) -> None:
 
 
 # ── Serve built React frontend (production) ───────────────────────────────────
-# IMPORTANT: must be registered LAST so it doesn't shadow API routes.
-if _FRONTEND_BUILD.exists():
-    app.mount("/assets", StaticFiles(directory=str(_FRONTEND_BUILD / "assets")), name="assets")
+_ASSETS_DIR = _FRONTEND_BUILD / "assets"
+if _ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=str(_ASSETS_DIR)), name="assets")
 
-    @app.get("/", include_in_schema=False)
-    @app.get("/{full_path:path}", include_in_schema=False)
-    async def serve_spa(full_path: str = ""):
-        from fastapi.responses import HTMLResponse
-        index = _FRONTEND_BUILD / "index.html"
-        if index.exists():
-            return HTMLResponse(index.read_text())
-        return HTMLResponse("<h1>Frontend not built</h1>", status_code=503)
+
+def _serve_index() -> HTMLResponse:
+    index = _FRONTEND_BUILD / "index.html"
+    if index.exists():
+        return HTMLResponse(index.read_text())
+    return HTMLResponse("<h1>Resume Agent API is running</h1>")
+
+
+@app.get("/", include_in_schema=False)
+async def serve_root() -> HTMLResponse:
+    return _serve_index()
+
+
+@app.exception_handler(404)
+async def spa_fallback(request: Request, exc: HTTPException) -> HTMLResponse | JSONResponse:
+    """Return the SPA shell for all unmatched paths so client-side routing works.
+    API-like paths get a proper JSON 404 instead."""
+    _api_prefixes = (
+        "/api/", "/ws/", "/health", "/run", "/status",
+        "/packages", "/upload", "/config", "/tracking",
+        "/tailored", "/packages-files",
+    )
+    if any(request.url.path.startswith(p) for p in _api_prefixes):
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    return _serve_index()

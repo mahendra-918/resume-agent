@@ -104,6 +104,9 @@ async def _ensure_browser(resume_pdf: str | None) -> tuple | None:
         user_agent=_USER_AGENT,
         locale="en-US",
         timezone_id="America/New_York",
+        extra_http_headers={
+            "Accept-Language": "en-US,en;q=0.9",
+        },
     )
     page = await context.new_page()
 
@@ -143,6 +146,18 @@ async def _do_login(page) -> None:
         await page.wait_for_timeout(40_000)
 
     await _save_cookies(page)
+
+    # Force LinkedIn language to English by visiting the language settings URL
+    try:
+        await page.goto(
+            "https://www.linkedin.com/psettings/language?lang=en_US",
+            wait_until="domcontentloaded",
+            timeout=10_000,
+        )
+        await page.wait_for_timeout(2000)
+        logger.info("[LinkedIn] Language forced to English")
+    except Exception:
+        pass  # non-critical — continue even if this fails
 
 
 def _is_login_wall(url: str) -> bool:

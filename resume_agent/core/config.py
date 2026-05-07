@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     # ── LinkedIn credentials ──────────────────────────────────────────────────
     LINKEDIN_EMAIL: str = ""
     LINKEDIN_PASSWORD: str = ""
+    LINKEDIN_PHONE: str = ""
 
     # ── Browser ───────────────────────────────────────────────────────────────
     HEADLESS: bool = True

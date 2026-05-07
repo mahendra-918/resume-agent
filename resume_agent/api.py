@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, UploadFile, File, Depends
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.routing import APIRouter
 from fastapi.staticfiles import StaticFiles
@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from loguru import logger
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 
 from resume_agent.utils.logger import setup_logger
 
@@ -23,6 +23,8 @@ setup_logger()
 
 
 _ws_clients: dict[str, list[WebSocket]] = defaultdict(list)
+
+
 
 
 class _StripApiPrefix(BaseHTTPMiddleware):
@@ -63,6 +65,58 @@ app.add_middleware(
 )
 app.add_middleware(_StripApiPrefix)
 
+
+@app.on_event("startup")
+async def _startup():
+    from resume_agent.db.repository import init_db
+    await init_db()
+
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+from resume_agent.auth import (
+    create_user, authenticate_user, create_token, get_current_user,
+)
+from resume_agent.db.repository import SessionLocal
+from resume_agent.db.models import UserRecord
+
+
+class RegisterRequest(BaseModel):
+    email: str
+    password: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.post("/auth/register")
+async def register(req: RegisterRequest) -> JSONResponse:
+    if len(req.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+    async with SessionLocal() as session:
+        async with session.begin():
+            user = await create_user(session, req.email, req.password)
+    token = create_token(user.id, user.email)
+    logger.info(f"[AUTH] New user registered: {user.email}")
+    return JSONResponse({"token": token, "email": user.email})
+
+
+@app.post("/auth/login")
+async def login(req: LoginRequest) -> JSONResponse:
+    async with SessionLocal() as session:
+        async with session.begin():
+            user = await authenticate_user(session, req.email, req.password)
+    token = create_token(user.id, user.email)
+    logger.info(f"[AUTH] User logged in: {user.email}")
+    return JSONResponse({"token": token, "email": user.email})
+
+
+@app.get("/auth/me")
+async def me(current_user: dict = Depends(get_current_user)) -> JSONResponse:
+    return JSONResponse(current_user)
+
 _TAILORED_DIR = Path("output/tailored")
 _TAILORED_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/tailored", StaticFiles(directory=str(_TAILORED_DIR)), name="tailored")
@@ -86,7 +140,6 @@ class RunRequest(BaseModel):
     use_internshala: Optional[bool] = None
     use_naukri: Optional[bool] = None
     use_wellfound: Optional[bool] = None
-    apply_enabled: bool = False
 
 
 class RunResponse(BaseModel):
@@ -205,12 +258,29 @@ _ALLOWED_EXTENSIONS = {".md", ".pdf", ".docx"}
 _UPLOAD_DIR = Path("output/resumes")
 
 
-@app.post("/upload")
-async def upload_resume(file: UploadFile = File(...)) -> JSONResponse:
-    """Accept a resume file upload and save it to output/resumes/.
+def _user_packages_dir(user_id: int) -> Path:
+    d = Path(f"output/users/{user_id}/packages")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
-    Returns the server-side path the frontend should pass to POST /run.
-    """
+
+def _user_resumes_dir(user_id: int) -> Path:
+    d = Path(f"output/users/{user_id}/resumes")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _user_tailored_dir(user_id: int) -> Path:
+    d = Path(f"output/users/{user_id}/tailored")
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+@app.post("/upload")
+async def upload_resume(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
     suffix = Path(file.filename).suffix.lower()
     if suffix not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -218,8 +288,8 @@ async def upload_resume(file: UploadFile = File(...)) -> JSONResponse:
             detail=f"Unsupported file type '{suffix}'. Allowed: {_ALLOWED_EXTENSIONS}",
         )
 
-    _UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-    dest = _UPLOAD_DIR / file.filename
+    upload_dir = _user_resumes_dir(current_user["id"])
+    dest = upload_dir / file.filename
 
     content = await file.read()
     dest.write_bytes(content)
@@ -230,7 +300,7 @@ async def upload_resume(file: UploadFile = File(...)) -> JSONResponse:
 
 
 @app.post("/run", response_model=RunResponse)
-async def start_run(request: RunRequest) -> RunResponse:
+async def start_run(request: RunRequest, current_user: dict = Depends(get_current_user)) -> RunResponse:
     path = Path(request.resume_path)
     if path.suffix.lower() not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -271,14 +341,19 @@ async def start_run(request: RunRequest) -> RunResponse:
         object.__setattr__(_base_settings, k, v)
     logger.info(f"[API] Settings overrides applied: {list(overrides.keys())}")
 
+    user_id = current_user["id"]
+    pkg_dir = str(_user_packages_dir(user_id))
+    tai_dir = str(_user_tailored_dir(user_id))
+
     async def _run() -> None:
         try:
             await run_pipeline(
                 resume_path=request.resume_path,
                 max_applications=request.max_applications,
-                apply_enabled=request.apply_enabled,
                 run_id=run_id,
                 emit=broadcast,
+                packages_base_dir=pkg_dir,
+                tailored_base_dir=tai_dir,
             )
         except Exception as e:
             logger.error(f"[API] Background pipeline error: {e}")
@@ -293,57 +368,46 @@ async def start_run(request: RunRequest) -> RunResponse:
     return RunResponse(run_id=run_id, status="started", message="Agent is running in background")
 
 
-@app.get("/status", response_model=list[ApplicationOut])
-async def get_status() -> list[ApplicationOut]:
-    """Return generated packages as application results for dashboard compatibility."""
-    packages_dir = Path("output/packages")
+def _read_packages_dir(packages_dir: Path) -> list[ApplicationOut]:
     if not packages_dir.exists():
         return []
-
     results = []
     for job_dir in sorted(packages_dir.iterdir()):
         if not job_dir.is_dir():
             continue
         readme = job_dir / "README.md"
-
         job_title, company, platform_str, job_url, score_str, generated_at = (
             "", "", "linkedin", "", "0", None
         )
-        missing_skills = []
+        missing_skills: list[str] = []
         in_missing = False
         if readme.exists():
             for line in readme.read_text().splitlines():
-                if line.startswith("**Job:**"):       job_title    = line.split("**Job:**")[-1].strip()
-                if line.startswith("**Company:**"):   company      = line.split("**Company:**")[-1].strip()
-                if line.startswith("**Platform:**"):  platform_str = line.split("**Platform:**")[-1].strip()
-                if line.startswith("**Job URL:**"):   job_url      = line.split("**Job URL:**")[-1].strip()
+                if line.startswith("**Job:**"):        job_title    = line.split("**Job:**")[-1].strip()
+                if line.startswith("**Company:**"):    company      = line.split("**Company:**")[-1].strip()
+                if line.startswith("**Platform:**"):   platform_str = line.split("**Platform:**")[-1].strip()
+                if line.startswith("**Job URL:**"):    job_url      = line.split("**Job URL:**")[-1].strip()
                 if line.startswith("**Match Score:**"):
                     score_str = line.split("**Match Score:**")[-1].strip().replace("%", "")
-                if line.startswith("**Generated:**"):
-                    generated_at = line.split("**Generated:**")[-1].strip()
+                if line.startswith("**Generated:**"):  generated_at = line.split("**Generated:**")[-1].strip()
                 if line.strip() == "## Missing Skills to Address":
-                    in_missing = True
-                    continue
+                    in_missing = True; continue
                 if in_missing and line.startswith("- "):
                     missing_skills.append(line[2:].strip())
                 elif in_missing and line.startswith("##"):
                     in_missing = False
-
         try:
             score = float(score_str) / 100
         except (ValueError, ZeroDivisionError):
             score = 0.0
-
         resume_pdf = None
         resume_ref_file = job_dir / "resume_path.txt"
         if resume_ref_file.exists():
             resume_pdf = resume_ref_file.read_text().strip()
-
         missing_str = ", ".join(missing_skills[:5]) if missing_skills else ""
         notes_value = f"Package ready → {job_dir.name}"
         if missing_str:
             notes_value += f" | Missing: {missing_str}"
-
         results.append(ApplicationOut(
             job_title=job_title or job_dir.name,
             company=company,
@@ -355,27 +419,31 @@ async def get_status() -> list[ApplicationOut]:
             notes=notes_value,
             tailored_resume_path=resume_pdf,
         ))
-
     return results
 
 
+@app.get("/status", response_model=list[ApplicationOut])
+async def get_status(current_user: dict = Depends(get_current_user)) -> list[ApplicationOut]:
+    return _read_packages_dir(_user_packages_dir(current_user["id"]))
+
+
 @app.delete("/applications", response_model=dict)
-async def clear_applications() -> dict:
+async def clear_applications(current_user: dict = Depends(get_current_user)) -> dict:
     import shutil
-    packages_dir = Path("output/packages")
+    packages_dir = _user_packages_dir(current_user["id"])
     count = 0
     if packages_dir.exists():
         for d in packages_dir.iterdir():
             if d.is_dir():
                 shutil.rmtree(d)
                 count += 1
-    logger.info(f"[API] Cleared {count} packages from disk")
+    logger.info(f"[API] Cleared {count} packages for user {current_user['id']}")
     return {"deleted": count}
 
 
 @app.get("/status/{platform}", response_model=list[ApplicationOut])
-async def get_status_by_platform(platform: str) -> list[ApplicationOut]:
-    all_results = await get_status()
+async def get_status_by_platform(platform: str, current_user: dict = Depends(get_current_user)) -> list[ApplicationOut]:
+    all_results = _read_packages_dir(_user_packages_dir(current_user["id"]))
     filtered = [r for r in all_results if r.platform.lower() == platform.lower()]
     if not filtered and platform.lower() not in {"linkedin", "internshala", "naukri", "wellfound"}:
         raise HTTPException(status_code=404, detail=f"Unknown platform: {platform}")
@@ -388,31 +456,27 @@ async def health() -> HealthResponse:
 
 
 @app.get("/packages", response_model=list[PackageOut])
-async def list_packages() -> list[PackageOut]:
-    """List all generated application packages from disk."""
-    packages_dir = Path("output/packages")
+async def list_packages(current_user: dict = Depends(get_current_user)) -> list[PackageOut]:
+    packages_dir = _user_packages_dir(current_user["id"])
     if not packages_dir.exists():
         return []
-
     results = []
     for job_dir in sorted(packages_dir.iterdir()):
         if not job_dir.is_dir():
             continue
         readme = job_dir / "README.md"
         cover = job_dir / "cover_letter.txt"
-        email = job_dir / "email_draft.txt"
+        email_f = job_dir / "email_draft.txt"
         prep = job_dir / "interview_prep.txt"
-
         job_title, company, platform_str, job_url, score_str = "", "", "linkedin", "", "0"
         if readme.exists():
             for line in readme.read_text().splitlines():
-                if line.startswith("**Job:**"):       job_title    = line.split("**Job:**")[-1].strip()
-                if line.startswith("**Company:**"):   company      = line.split("**Company:**")[-1].strip()
-                if line.startswith("**Platform:**"):  platform_str = line.split("**Platform:**")[-1].strip()
-                if line.startswith("**Job URL:**"):   job_url      = line.split("**Job URL:**")[-1].strip()
+                if line.startswith("**Job:**"):        job_title    = line.split("**Job:**")[-1].strip()
+                if line.startswith("**Company:**"):    company      = line.split("**Company:**")[-1].strip()
+                if line.startswith("**Platform:**"):   platform_str = line.split("**Platform:**")[-1].strip()
+                if line.startswith("**Job URL:**"):    job_url      = line.split("**Job URL:**")[-1].strip()
                 if line.startswith("**Match Score:**"):
                     score_str = line.split("**Match Score:**")[-1].strip().replace("%", "")
-
         results.append(PackageOut(
             job_title=job_title or job_dir.name,
             company=company,
@@ -421,31 +485,30 @@ async def list_packages() -> list[PackageOut]:
             relevance_score=float(score_str) / 100 if score_str else 0.0,
             output_dir=str(job_dir),
             has_cover_letter=cover.exists(),
-            has_email_draft=email.exists(),
+            has_email_draft=email_f.exists(),
             has_interview_prep=prep.exists(),
         ))
     return results
 
 
 @app.get("/packages/{package_dir}/{file_name}")
-async def get_package_file(package_dir: str, file_name: str) -> JSONResponse:
-    """Return the text content of a specific package file."""
+async def get_package_file(
+    package_dir: str, file_name: str,
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
     allowed_files = {"cover_letter.txt", "email_draft.txt", "interview_prep.txt", "README.md"}
     if file_name not in allowed_files:
         raise HTTPException(status_code=400, detail=f"File not allowed: {file_name}")
-
-    file_path = Path("output/packages") / package_dir / file_name
+    file_path = _user_packages_dir(current_user["id"]) / package_dir / file_name
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="File not found")
-
     return JSONResponse({"content": file_path.read_text(encoding="utf-8")})
 
 
 @app.delete("/packages", response_model=dict)
-async def clear_packages() -> dict:
-    """Delete all generated packages from disk."""
+async def clear_packages(current_user: dict = Depends(get_current_user)) -> dict:
     import shutil
-    packages_dir = Path("output/packages")
+    packages_dir = _user_packages_dir(current_user["id"])
     count = 0
     if packages_dir.exists():
         for d in packages_dir.iterdir():
@@ -456,41 +519,35 @@ async def clear_packages() -> dict:
 
 
 @app.get("/tracking", response_model=list[TrackingOut])
-async def get_tracking() -> list[TrackingOut]:
-    """Return all packages with their tracking status."""
-    packages_dir = Path("output/packages")
+async def get_tracking(current_user: dict = Depends(get_current_user)) -> list[TrackingOut]:
+    packages_dir = _user_packages_dir(current_user["id"])
     if not packages_dir.exists():
         return []
-
     results = []
     for job_dir in sorted(packages_dir.iterdir()):
         if not job_dir.is_dir():
             continue
         readme = job_dir / "README.md"
         tracking = _read_tracking(job_dir)
-
         job_title, company, platform_str, job_url, score_str, generated_at = (
             "", "", "linkedin", "", "0", None
         )
         if readme.exists():
             for line in readme.read_text().splitlines():
-                if line.startswith("**Job:**"):        job_title    = line.split("**Job:**")[-1].strip()
-                if line.startswith("**Company:**"):    company      = line.split("**Company:**")[-1].strip()
-                if line.startswith("**Platform:**"):   platform_str = line.split("**Platform:**")[-1].strip()
-                if line.startswith("**Job URL:**"):    job_url      = line.split("**Job URL:**")[-1].strip()
-                if line.startswith("**Match Score:**"): score_str   = line.split("**Match Score:**")[-1].strip().replace("%", "")
-                if line.startswith("**Generated:**"):  generated_at = line.split("**Generated:**")[-1].strip()
-
+                if line.startswith("**Job:**"):         job_title    = line.split("**Job:**")[-1].strip()
+                if line.startswith("**Company:**"):     company      = line.split("**Company:**")[-1].strip()
+                if line.startswith("**Platform:**"):    platform_str = line.split("**Platform:**")[-1].strip()
+                if line.startswith("**Job URL:**"):     job_url      = line.split("**Job URL:**")[-1].strip()
+                if line.startswith("**Match Score:**"): score_str    = line.split("**Match Score:**")[-1].strip().replace("%", "")
+                if line.startswith("**Generated:**"):   generated_at = line.split("**Generated:**")[-1].strip()
         try:
             score = float(score_str) / 100
         except (ValueError, ZeroDivisionError):
             score = 0.0
-
         resume_pdf = None
         resume_ref = job_dir / "resume_path.txt"
         if resume_ref.exists():
             resume_pdf = resume_ref.read_text().strip()
-
         results.append(TrackingOut(
             package_dir=job_dir.name,
             job_title=job_title or job_dir.name,
@@ -510,9 +567,11 @@ async def get_tracking() -> list[TrackingOut]:
 
 
 @app.patch("/tracking/{package_dir}", response_model=dict)
-async def update_tracking(package_dir: str, update: TrackingUpdate) -> dict:
-    """Update the tracking status and notes for a package."""
-    job_dir = Path("output/packages") / package_dir
+async def update_tracking(
+    package_dir: str, update: TrackingUpdate,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    job_dir = _user_packages_dir(current_user["id"]) / package_dir
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Package not found")
     _write_tracking(job_dir, update.status, update.notes or "")
@@ -520,9 +579,11 @@ async def update_tracking(package_dir: str, update: TrackingUpdate) -> dict:
 
 
 @app.get("/tracking/{package_dir}", response_model=dict)
-async def get_package_tracking(package_dir: str) -> dict:
-    """Get tracking status for a single package."""
-    job_dir = Path("output/packages") / package_dir
+async def get_package_tracking(
+    package_dir: str,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    job_dir = _user_packages_dir(current_user["id"]) / package_dir
     if not job_dir.exists():
         raise HTTPException(status_code=404, detail="Package not found")
     return _read_tracking(job_dir)
@@ -568,7 +629,7 @@ def _write_env(updates: dict[str, str]) -> None:
 
 
 @app.get("/config/llm", response_model=LLMConfig)
-async def get_llm_config() -> LLMConfig:
+async def get_llm_config(current_user: dict = Depends(get_current_user)) -> LLMConfig:
     """Return current LLM provider config (keys masked)."""
     from resume_agent.core.config import settings as _s
     groq_key = _s.GROQ_API_KEY or ""
@@ -582,7 +643,7 @@ async def get_llm_config() -> LLMConfig:
 
 
 @app.post("/config/llm", response_model=dict)
-async def save_llm_config(config: LLMConfig) -> dict:
+async def save_llm_config(config: LLMConfig, current_user: dict = Depends(get_current_user)) -> dict:
     """Persist LLM provider and API keys to .env and reload settings."""
     from resume_agent.core.config import settings as _s
 
@@ -623,7 +684,7 @@ class LinkedInConfig(BaseModel):
 
 
 @app.get("/config/linkedin", response_model=dict)
-async def get_linkedin_config() -> dict:
+async def get_linkedin_config(current_user: dict = Depends(get_current_user)) -> dict:
     from resume_agent.core.config import settings as _s
     email = _s.LINKEDIN_EMAIL or ""
     return {
@@ -633,7 +694,7 @@ async def get_linkedin_config() -> dict:
 
 
 @app.post("/config/linkedin", response_model=dict)
-async def save_linkedin_config(config: LinkedInConfig) -> dict:
+async def save_linkedin_config(config: LinkedInConfig, current_user: dict = Depends(get_current_user)) -> dict:
     from resume_agent.core.config import settings as _s
     updates: dict[str, str] = {}
     if config.linkedin_email:
@@ -648,6 +709,61 @@ async def save_linkedin_config(config: LinkedInConfig) -> dict:
             object.__setattr__(_s, "LINKEDIN_PASSWORD", config.linkedin_password)
     logger.info("[API] LinkedIn credentials updated")
     return {"status": "saved"}
+
+
+@app.post("/apply/{package_dir}", response_model=dict)
+async def apply_job(package_dir: str, current_user: dict = Depends(get_current_user)) -> dict:
+    """Trigger LinkedIn Easy Apply for a specific package."""
+    job_dir = _user_packages_dir(current_user["id"]) / package_dir
+    if not job_dir.exists():
+        raise HTTPException(status_code=404, detail="Package not found")
+
+    readme = job_dir / "README.md"
+    job_url = ""
+    if readme.exists():
+        for line in readme.read_text().splitlines():
+            if line.startswith("**Job URL:**"):
+                job_url = line.split("**Job URL:**")[-1].strip()
+
+    if not job_url or "linkedin.com" not in job_url:
+        raise HTTPException(status_code=400, detail="No LinkedIn URL found for this package")
+
+    from resume_agent.nodes.linkedin_applier import apply_linkedin_node
+    from resume_agent.core.models import Job
+    from resume_agent.core.state import AgentState
+
+    job_title, company = "", ""
+    if readme.exists():
+        for line in readme.read_text().splitlines():
+            if line.startswith("**Job:**"):     job_title = line.split("**Job:**")[-1].strip()
+            if line.startswith("**Company:**"): company   = line.split("**Company:**")[-1].strip()
+
+    # Find tailored resume PDF for this package
+    resume_pdf_path = ""
+    resume_ref = job_dir / "resume_path.txt"
+    if resume_ref.exists():
+        resume_pdf_path = resume_ref.read_text().strip()
+    if not resume_pdf_path:
+        tailored_dir = _user_tailored_dir(current_user["id"])
+        slug = package_dir.replace("_", " ").lower()
+        for f in tailored_dir.glob("*.pdf"):
+            if any(word in f.stem.lower() for word in slug.split()[:3]):
+                resume_pdf_path = str(f)
+                break
+
+    from resume_agent.core.models import Platform
+    mock_job = Job(title=job_title, company=company, description="", url=job_url, platform=Platform.LINKEDIN)
+    mock_state: AgentState = {
+        "resume_path": resume_pdf_path, "resume_raw": "", "parsed_resume": None,
+        "search_queries": [], "jobs_found": [], "jobs_filtered": [],
+        "current_job_index": 0, "current_job": mock_job,
+        "tailored_resume": None, "packages": [], "errors": [],
+        "platform_status": {}, "dry_run": False, "max_applications": 1,
+    }
+
+    asyncio.create_task(apply_linkedin_node(mock_state))
+    logger.info(f"[API] LinkedIn apply triggered for {package_dir} → {job_url}")
+    return {"status": "started", "job_url": job_url}
 
 
 @app.websocket("/ws/{run_id}")
@@ -692,7 +808,7 @@ async def spa_fallback(request: Request, exc: HTTPException) -> HTMLResponse | J
     _api_prefixes = (
         "/api/", "/ws/", "/health", "/run", "/status",
         "/packages", "/upload", "/config", "/tracking",
-        "/tailored", "/packages-files",
+        "/tailored", "/packages-files", "/apply",
     )
     if any(request.url.path.startswith(p) for p in _api_prefixes):
         return JSONResponse({"detail": "Not found"}, status_code=404)

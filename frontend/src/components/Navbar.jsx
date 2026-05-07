@@ -1,13 +1,15 @@
 import { NavLink } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import { getStoredToken } from '../api'
 
 function usePackageCount() {
   const [count, setCount] = useState(null)
 
   useEffect(() => {
     function fetchCount() {
-      fetch('/api/status')
-        .then(r => r.json())
+      const token = getStoredToken()
+      fetch('/api/status', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+        .then(r => r.ok ? r.json() : [])
         .then(data => setCount(Array.isArray(data) ? data.length : 0))
         .catch(() => setCount(null))
     }
@@ -26,7 +28,7 @@ const NAV_LINKS = [
   { to: '/settings', label: 'Settings',  end: false },
 ]
 
-export default function Navbar({ isRunning }) {
+export default function Navbar({ isRunning, user, onLogout }) {
   const packageCount = usePackageCount()
 
   return (
@@ -66,12 +68,21 @@ export default function Navbar({ isRunning }) {
         ))}
       </div>
 
-      {isRunning && (
-        <div style={styles.runningPill}>
-          <span style={styles.liveDot} />
-          Live
-        </div>
-      )}
+      {/* Right side */}
+      <div style={styles.right}>
+        {isRunning && (
+          <div style={styles.runningPill}>
+            <span style={styles.liveDot} />
+            Live
+          </div>
+        )}
+        {user?.email && (
+          <span style={styles.userEmail}>{user.email}</span>
+        )}
+        {onLogout && (
+          <button onClick={onLogout} style={styles.logoutBtn}>Sign out</button>
+        )}
+      </div>
     </nav>
   )
 }
@@ -157,8 +168,13 @@ const styles = {
     boxShadow: '0 0 6px #22c55e',
     animation: 'pulse 1.4s ease-in-out infinite',
   },
-  runningPill: {
+  right: {
     marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '10px',
+  },
+  runningPill: {
     display: 'inline-flex',
     alignItems: 'center',
     gap: '6px',
@@ -169,5 +185,22 @@ const styles = {
     color: '#22c55e',
     fontSize: '12px',
     fontWeight: 600,
+  },
+  userEmail: {
+    fontSize: '12px',
+    color: 'var(--text-muted)',
+    maxWidth: 160,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  logoutBtn: {
+    padding: '4px 12px',
+    borderRadius: '6px',
+    border: '1px solid var(--border)',
+    background: 'transparent',
+    color: 'var(--text-muted)',
+    fontSize: '12px',
+    cursor: 'pointer',
   },
 }

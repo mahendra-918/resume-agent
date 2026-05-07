@@ -5,22 +5,38 @@ import RunPage from './pages/RunPage'
 import SettingsPage from './pages/SettingsPage'
 import HistoryPage from './pages/HistoryPage'
 import TrackingPage from './pages/TrackingPage'
+import LoginPage from './pages/LoginPage'
+import { getStoredToken, clearStoredToken } from './api'
 import './App.css'
 
-// ── Shared run state lives here so it survives page navigation ────────────────
-// RunPage reads/writes this. StatusPage reads `isRunning` to enable auto-refresh.
-export function useRunState() {
-  // This is exported so pages import it from App — but actually we pass it as
-  // props to avoid context boilerplate. See below.
+function App() {
+  const [user, setUser] = useState(() => {
+    const token = getStoredToken()
+    return token ? { token } : null
+  })
+
+  function handleLogin(userData) {
+    setUser(userData)
+  }
+
+  function handleLogout() {
+    clearStoredToken()
+    setUser(null)
+  }
+
+  if (!user) {
+    return <LoginPage onLogin={handleLogin} />
+  }
+
+  return <AuthenticatedApp user={user} onLogout={handleLogout} />
 }
 
-function App() {
-  // ── Live run state (persists across navigation) ──────────────────────────
-  const [runEvents,  setRunEvents]  = useState([])    // activity feed events
-  const [runSummary, setRunSummary] = useState(null)  // final summary when done
-  const [isRunning,  setIsRunning]  = useState(false) // is pipeline active?
-  const [runError,   setRunError]   = useState(null)  // error if pipeline crashed
-  const wsRef = useRef(null)                           // live WebSocket
+function AuthenticatedApp({ user, onLogout }) {
+  const [runEvents,  setRunEvents]  = useState([])
+  const [runSummary, setRunSummary] = useState(null)
+  const [isRunning,  setIsRunning]  = useState(false)
+  const [runError,   setRunError]   = useState(null)
+  const wsRef = useRef(null)
 
   const resetRun = useCallback(() => {
     setRunEvents([])
@@ -42,12 +58,12 @@ function App() {
 
   return (
     <BrowserRouter>
-      <Navbar isRunning={isRunning} />
+      <Navbar isRunning={isRunning} user={user} onLogout={onLogout} />
       <Routes>
-        <Route path="/"        element={<HistoryPage isRunning={isRunning} />} />
-        <Route path="/run"     element={<RunPage {...runProps} />} />
+        <Route path="/"         element={<HistoryPage isRunning={isRunning} />} />
+        <Route path="/run"      element={<RunPage {...runProps} />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/tracker" element={<TrackingPage />} />
+        <Route path="/tracker"  element={<TrackingPage />} />
       </Routes>
     </BrowserRouter>
   )

@@ -109,6 +109,7 @@ class Job(BaseModel):
     relevance_score: float = Field(default=0.0, ge=0.0, le=1.0)
     matched_skills: list[str] = []
     missing_skills: list[str] = []
+    is_easy_apply: Optional[bool] = None
 
 
 # ── Application Models ─────────────────────────────────────────────────────────

@@ -1,5 +1,10 @@
 import { useEffect, useState, useMemo, useRef } from 'react'
-import { getApplications, clearApplications } from '../api'
+import { getApplications, clearApplications, getStoredToken } from '../api'
+
+function authHeaders(extra = {}) {
+  const token = getStoredToken()
+  return token ? { Authorization: `Bearer ${token}`, ...extra } : extra
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -21,9 +26,9 @@ function PackageModal({ title, url, jobTitle, company, platform, score, jobUrl, 
   const [copied,  setCopied]  = useState(false)
 
   useEffect(() => {
-    fetch(url)
-      .then(r => r.json())
-      .then(data => { setContent(data.content); setLoading(false) })
+    fetch(url, { headers: authHeaders() })
+      .then(r => r.ok ? r.text() : Promise.reject(new Error(`Error ${r.status}`)))
+      .then(data => { setContent(data); setLoading(false) })
       .catch(err  => { setError(err.message);   setLoading(false) })
   }, [url])
 
@@ -175,7 +180,7 @@ function MissingSkills({ notes }) {
 
 function PackageActions({ app, onOpen }) {
   if (!app.notes?.includes('→')) return <span style={{ color:'var(--text-dim)' }}>—</span>
-  const dir = app.notes.split('→')[1].trim()
+  const dir = app.notes.split('→')[1].split('|')[0].trim()
   const files = [
     { label:'Cover Letter',   file:'cover_letter.txt',  color:'#a78bfa' },
     { label:'Email Draft',    file:'email_draft.txt',   color:'#60a5fa' },
@@ -198,7 +203,7 @@ function PackageActions({ app, onOpen }) {
           key={file}
           onClick={() => onOpen({
             title:    `${label} — ${app.job_title} @ ${app.company}`,
-            url:      `/api/packages/${dir}/${file}`,
+            url:      `/api/packages-files/${dir}/${file}`,
             jobTitle: app.job_title,
             company:  app.company,
             platform: app.platform,

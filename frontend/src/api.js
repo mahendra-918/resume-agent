@@ -2,6 +2,49 @@ import axios from 'axios'
 
 const client = axios.create({ baseURL: '/api' })
 
+const TOKEN_KEY = 'auth_token'
+
+export function getStoredToken() { return localStorage.getItem(TOKEN_KEY) || '' }
+export function setStoredToken(t) { localStorage.setItem(TOKEN_KEY, t) }
+export function clearStoredToken() { localStorage.removeItem(TOKEN_KEY) }
+
+// Attach stored token to every request
+client.interceptors.request.use(config => {
+  const token = getStoredToken()
+  if (token) config.headers['Authorization'] = `Bearer ${token}`
+  return config
+})
+
+// On 401, clear token and reload so App re-renders the login page
+client.interceptors.response.use(
+  res => res,
+  err => {
+    if (err?.response?.status === 401) {
+      clearStoredToken()
+      window.location.reload()
+    }
+    return Promise.reject(err)
+  }
+)
+
+export async function register(email, password) {
+  try {
+    const { data } = await client.post('/auth/register', { email, password })
+    return data  // { token, email }
+  } catch (error) {
+    throw new Error(extractMessage(error))
+  }
+}
+
+export async function loginUser(email, password) {
+  try {
+    const { data } = await client.post('/auth/login', { email, password })
+    return data  // { token, email }
+  } catch (error) {
+    throw new Error(extractMessage(error))
+  }
+}
+
 function extractMessage(error) {
   return error?.response?.data?.detail
     || error?.response?.data?.message
@@ -18,7 +61,7 @@ export async function getHealth() {
   }
 }
 
-export async function startRun({ resumePath, settings, applyEnabled = false }) {
+export async function startRun({ resumePath, settings }) {
   const s = settings || {}
   try {
     const { data } = await client.post('/run', {
@@ -32,7 +75,6 @@ export async function startRun({ resumePath, settings, applyEnabled = false }) {
       use_internshala: s.useInternshala,
       use_naukri: s.useNaukri,
       use_wellfound: s.useWellfound,
-      apply_enabled: applyEnabled,
     })
     // data = { run_id: "abc-123", status: "started", message: "..." }
     // run_id is what the caller needs to open the WebSocket
@@ -178,5 +220,14 @@ export async function cancelInteractiveLogin(platform) {
     return data
   } catch (error) {
     throw new Error(`Failed to cancel interactive login for ${platform}: ${extractMessage(error)}`)
+  }
+}
+
+export async function applyJob(packageDir) {
+  try {
+    const { data } = await client.post(`/apply/${packageDir}`)
+    return data
+  } catch (error) {
+    throw new Error(`Failed to start apply: ${extractMessage(error)}`)
   }
 }

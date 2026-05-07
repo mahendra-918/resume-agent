@@ -41,7 +41,8 @@ async def generate_package_node(state: AgentState) -> dict:
 
     # ── Build output directory ────────────────────────────────────────────────
     dir_name = f"{_safe_dirname(job.company)}_{_safe_dirname(job.title)}"
-    output_dir = Path("output") / "packages" / dir_name
+    base = Path(state["packages_base_dir"]) if state.get("packages_base_dir") else Path("output/packages")
+    output_dir = base / dir_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Prepare shared inputs ─────────────────────────────────────────────────

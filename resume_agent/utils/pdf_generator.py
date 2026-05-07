@@ -138,14 +138,16 @@ def _generate_html(tailored: TailoredResume) -> str:
     return html
 
 
-async def generate_tailored_pdf(tailored: TailoredResume) -> str:
+async def generate_tailored_pdf(tailored: TailoredResume, output_dir: Path | None = None) -> str:
     """
     Generate a PDF from the tailored resume data and return the absolute file path.
     """
     company_clean = _clean_filename(tailored.company)
     role_clean = _clean_filename(tailored.job_title)
     filename = f"Resume_{company_clean}_{role_clean}.pdf"
-    output_path = (OUTPUT_DIR / filename).resolve()
+    dest_dir = output_dir if output_dir else OUTPUT_DIR
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    output_path = (dest_dir / filename).resolve()
 
     html_content = _generate_html(tailored)
 

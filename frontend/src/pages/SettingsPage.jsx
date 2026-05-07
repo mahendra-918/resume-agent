@@ -1,4 +1,10 @@
 import { useState, useEffect } from 'react'
+import { getStoredToken } from '../api'
+
+function authHeaders(extra = {}) {
+  const token = getStoredToken()
+  return token ? { Authorization: `Bearer ${token}`, ...extra } : extra
+}
 
 const STORAGE_KEY = 'resumeAgentSettings'
 
@@ -70,13 +76,13 @@ export default function SettingsPage() {
   const [liLoading,   setLiLoading]   = useState(false)
 
   useEffect(() => {
-    fetch('/api/config/llm')
-      .then(r => r.json())
-      .then(d => { setLlmProvider(d.llm_provider || 'groq'); setGroqKey(d.groq_api_key || ''); setGeminiKey(d.gemini_api_key || '') })
+    fetch('/api/config/llm', { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) { setLlmProvider(d.llm_provider || 'groq'); setGroqKey(d.groq_api_key || ''); setGeminiKey(d.gemini_api_key || '') } })
       .catch(() => {})
-    fetch('/api/config/linkedin')
-      .then(r => r.json())
-      .then(d => { setLiEmail(d.linkedin_email === 'set' ? '••••••••' : ''); setLiPassword(d.linkedin_password === 'set' ? '••••••••' : '') })
+    fetch('/api/config/linkedin', { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) { setLiEmail(d.linkedin_email === 'set' ? '••••••••' : ''); setLiPassword(d.linkedin_password === 'set' ? '••••••••' : '') } })
       .catch(() => {})
   }, [])
 
@@ -88,7 +94,7 @@ export default function SettingsPage() {
     setLlmLoading(true); setLlmError('')
     try {
       const res = await fetch('/api/config/llm', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ llm_provider: llmProvider, groq_api_key: groqKey, gemini_api_key: geminiKey }),
       })
       if (!res.ok) throw new Error(await res.text())
@@ -104,7 +110,7 @@ export default function SettingsPage() {
     setLiLoading(true); setLiError('')
     try {
       const res = await fetch('/api/config/linkedin', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({ linkedin_email: liEmail, linkedin_password: liPassword }),
       })
       if (!res.ok) throw new Error(await res.text())
@@ -239,7 +245,7 @@ export default function SettingsPage() {
         {liSaved && <div style={s.successBanner}>✓ LinkedIn credentials saved</div>}
         {liError && <div style={s.errorBanner}>{liError}</div>}
         <p style={{ margin:'0 0 16px', fontSize:'13px', color:'var(--text-muted)', lineHeight:1.6 }}>
-          Required for LinkedIn Easy Apply. Credentials are stored in your local <code style={s.code}>.env</code> file.
+          Required for LinkedIn job search. Credentials are stored in your local <code style={s.code}>.env</code> file.
         </p>
         <div style={s.keyGrid}>
           <div style={s.field}>

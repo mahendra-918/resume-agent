@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from loguru import logger
 
 from resume_agent.core.models import Job, ParsedResume, ResumeProject, ResumeExperience, TailoredResume
@@ -47,7 +48,8 @@ async def tailor_resume_node(state: AgentState) -> dict:
         )
 
         # Generate physical PDF
-        pdf_path = await generate_tailored_pdf(tailored)
+        tailored_dir = Path(state["tailored_base_dir"]) if state.get("tailored_base_dir") else None
+        pdf_path = await generate_tailored_pdf(tailored, output_dir=tailored_dir)
         tailored.file_path = pdf_path
 
         logger.info(f"[ResumeTailor] Done — PDF generated at {pdf_path}")

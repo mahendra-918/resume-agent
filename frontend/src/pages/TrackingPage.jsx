@@ -1,4 +1,10 @@
 import { useState, useEffect } from 'react'
+import { applyJob, getStoredToken } from '../api'
+
+function authHeaders(extra = {}) {
+  const token = getStoredToken()
+  return token ? { Authorization: `Bearer ${token}`, ...extra } : extra
+}
 
 const COLUMNS = [
   { key: 'ready',        label: 'Package Ready', icon: '⬡', accent: '#8b5cf6', dim: 'rgba(139,92,246,0.1)',  border: 'rgba(139,92,246,0.2)'  },
@@ -63,7 +69,23 @@ function JobCard({ card, columns, onMove, onNote }) {
   const pct         = Math.round((card.relevance_score || 0) * 100)
   const scoreColor  = pct >= 70 ? '#22c55e' : pct >= 50 ? '#f59e0b' : '#ef4444'
   const platformCol = PLATFORM_COLORS[card.platform] || 'var(--text-muted)'
-  const [expanded, setExpanded] = useState(false)
+  const [expanded,  setExpanded]  = useState(false)
+  const [applying,  setApplying]  = useState(false)
+  const [applyMsg,  setApplyMsg]  = useState(null)
+
+  const isLinkedIn = card.platform?.toLowerCase() === 'linkedin'
+
+  async function handleApply() {
+    setApplying(true); setApplyMsg(null)
+    try {
+      await applyJob(card.package_dir)
+      setApplyMsg({ ok: true, text: 'Browser opened — applying…' })
+    } catch (err) {
+      setApplyMsg({ ok: false, text: err.message })
+    } finally {
+      setApplying(false)
+    }
+  }
 
   return (
     <div style={s.card}>
@@ -95,6 +117,11 @@ function JobCard({ card, columns, onMove, onNote }) {
         {card.job_url && (
           <a href={card.job_url} target="_blank" rel="noreferrer" style={s.cardLink}>View ↗</a>
         )}
+        {isLinkedIn && (
+          <button onClick={handleApply} disabled={applying} style={s.applyBtn}>
+            {applying ? '…' : '⚡ Apply with AI'}
+          </button>
+        )}
         <button onClick={() => onNote(card)} style={s.noteBtn}>
           {card.notes ? 'Edit note' : '+ Note'}
         </button>
@@ -102,6 +129,11 @@ function JobCard({ card, columns, onMove, onNote }) {
           {expanded ? '▲' : '▼'}
         </button>
       </div>
+      {applyMsg && (
+        <div style={{ fontSize:'11px', marginTop:'6px', color: applyMsg.ok ? '#4ade80' : '#f87171' }}>
+          {applyMsg.text}
+        </div>
+      )}
 
       {/* Move to column buttons */}
       {expanded && (
@@ -162,7 +194,8 @@ export default function TrackingPage() {
   async function fetchCards() {
     setLoading(true)
     try {
-      const r = await fetch('/api/tracking')
+      const r = await fetch('/api/tracking', { headers: authHeaders() })
+      if (!r.ok) throw new Error(`Error ${r.status}`)
       setCards(await r.json())
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
@@ -173,7 +206,7 @@ export default function TrackingPage() {
   async function handleMove(packageDir, newStatus, notes) {
     await fetch(`/api/tracking/${packageDir}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ status: newStatus, notes: notes || '' }),
     })
     setCards(prev => prev.map(c => c.package_dir === packageDir ? { ...c, status: newStatus } : c))
@@ -182,7 +215,7 @@ export default function TrackingPage() {
   async function handleSaveNote(packageDir, status, notes) {
     await fetch(`/api/tracking/${packageDir}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ status, notes }),
     })
     setCards(prev => prev.map(c => c.package_dir === packageDir ? { ...c, notes } : c))
@@ -311,6 +344,7 @@ const s = {
   cardNotes:   { fontSize:'11px', color:'var(--text-muted)', background:'var(--surface-3)', borderRadius:'5px', padding:'6px 8px', marginBottom:'8px', lineHeight:1.5 },
   cardFooter:  { display:'flex', alignItems:'center', gap:'6px' },
   cardLink:    { fontSize:'11px', color:'var(--accent)', fontWeight:600, textDecoration:'none' },
+  applyBtn:    { fontSize:'11px', color:'#a78bfa', background:'rgba(139,92,246,0.1)', border:'1px solid rgba(139,92,246,0.3)', borderRadius:'4px', padding:'2px 8px', cursor:'pointer', fontWeight:600 },
   noteBtn:     { fontSize:'11px', color:'var(--text-muted)', background:'none', border:'1px solid var(--border)', borderRadius:'4px', padding:'2px 7px', cursor:'pointer', marginLeft:'auto' },
   moreBtn:     { fontSize:'10px', color:'var(--text-dim)', background:'none', border:'1px solid var(--border)', borderRadius:'4px', padding:'2px 6px', cursor:'pointer' },
   moveGrid:    { display:'flex', flexWrap:'wrap', gap:'4px', marginTop:'8px', paddingTop:'8px', borderTop:'1px solid var(--border)' },

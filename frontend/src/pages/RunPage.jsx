@@ -6,9 +6,6 @@ const STORAGE_KEY = 'resumeAgentSettings'
 const EVENT_STYLE = {
   node_done:         { color: '#4ade80', bg: 'rgba(34,197,94,0.08)',   border: 'rgba(34,197,94,0.15)',   icon: '✓' },
   package_generated: { color: '#a78bfa', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.15)',  icon: '⬡' },
-  applied:           { color: '#22c55e', bg: 'rgba(34,197,94,0.12)',   border: 'rgba(34,197,94,0.3)',    icon: '✅' },
-  skipped:           { color: '#71717a', bg: 'rgba(113,113,122,0.06)', border: 'rgba(113,113,122,0.12)', icon: '·'  },
-  failed:            { color: '#f87171', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.15)',   icon: '✕' },
   error:             { color: '#f87171', bg: 'rgba(239,68,68,0.08)',   border: 'rgba(239,68,68,0.15)',   icon: '!' },
   done:              { color: '#a78bfa', bg: 'rgba(139,92,246,0.08)', border: 'rgba(139,92,246,0.15)',  icon: '◆' },
 }
@@ -29,14 +26,7 @@ function eventMessage(ev) {
     const s = ev.summary || {}
     return `Run complete · ${s.packages ?? 0} packages generated · ${s.jobs_found ?? 0} jobs found`
   }
-  if (ev.type === 'applied') return ev.message || `Applied → ${ev.job} @ ${ev.company}`
   return ev.message || ev.node || ev.type || 'Event received'
-}
-
-// Don't render low-signal skipped-apply events when apply is disabled
-function shouldShowEvent(ev) {
-  if (ev.type === 'skipped' && ev.message && ev.message.startsWith('Apply disabled')) return false
-  return true
 }
 
 // ── Event Row ─────────────────────────────────────────────────────────────────
@@ -139,8 +129,6 @@ export default function RunPage({ runEvents, setRunEvents, runSummary, setRunSum
   const [isDragging,   setIsDragging]   = useState(false)
   const [uploading,    setUploading]    = useState(false)
   const [uploadError,  setUploadError]  = useState(null)
-  const [applyEnabled, setApplyEnabled] = useState(false)
-
   useEffect(() => {
     if (feedRef.current) feedRef.current.scrollTop = feedRef.current.scrollHeight
   }, [runEvents])
@@ -151,7 +139,7 @@ export default function RunPage({ runEvents, setRunEvents, runSummary, setRunSum
     setRunEvents([]); setRunSummary(null); setRunError(null); setIsRunning(true)
     if (!uploadedPath) { setRunError('Please upload a resume file first.'); setIsRunning(false); return }
     try {
-      const { run_id } = await startRun({ resumePath: uploadedPath, settings: loadSettings(), applyEnabled })
+      const { run_id } = await startRun({ resumePath: uploadedPath, settings: loadSettings() })
       wsRef.current = openRunSocket(run_id, (ev) => {
         setRunEvents(prev => [...prev, ev])
         if (ev.type === 'done')  { setRunSummary(ev.summary); setIsRunning(false); wsRef.current?.close(); wsRef.current = null }
@@ -206,27 +194,6 @@ export default function RunPage({ runEvents, setRunEvents, runSummary, setRunSum
             />
           </div>
 
-          <div style={s.applyToggleRow}>
-            <label style={s.applyToggleLabel}>
-              <div
-                role="switch"
-                aria-checked={applyEnabled}
-                tabIndex={0}
-                style={{ ...s.track, background: applyEnabled ? 'var(--accent)' : 'var(--surface-3)', boxShadow: applyEnabled ? '0 0 8px rgba(139,92,246,0.4)' : 'none', opacity: isRunning ? 0.5 : 1, pointerEvents: isRunning ? 'none' : 'auto' }}
-                onClick={() => !isRunning && setApplyEnabled(v => !v)}
-                onKeyDown={e => !isRunning && (e.key === ' ' || e.key === 'Enter') && setApplyEnabled(v => !v)}
-              >
-                <div style={{ ...s.knob, transform: applyEnabled ? 'translateX(20px)' : 'translateX(2px)' }} />
-              </div>
-              <span style={s.applyToggleText}>Apply to Jobs (LinkedIn Easy Apply)</span>
-            </label>
-            {applyEnabled && (
-              <div style={s.applyWarning}>
-                Browser window will open during the run — make sure LinkedIn credentials are set in Settings.
-              </div>
-            )}
-          </div>
-
           <div style={s.btnRow}>
             <button type="submit" disabled={isRunning} style={{ ...s.btn, ...s.btnPrimary, opacity: isRunning ? 0.5 : 1 }}>
               {isRunning ? <><span style={s.spinner} /> Running…</> : '▶  Start Run'}
@@ -254,7 +221,7 @@ export default function RunPage({ runEvents, setRunEvents, runSummary, setRunSum
             <span style={s.feedBadge}>{runEvents.length} events</span>
           </div>
           <div style={s.feed} ref={feedRef}>
-            {runEvents.filter(shouldShowEvent).map((ev, i) => <EventRow key={i} ev={ev} />)}
+            {runEvents.map((ev, i) => <EventRow key={i} ev={ev} />)}
             {isRunning && (
               <div style={s.workingRow}>
                 <span style={s.workingDot} />
@@ -338,10 +305,4 @@ const s = {
   summaryHint:  { margin:'16px 0 0', fontSize:'13px', color:'var(--text-muted)' },
   link:         { color:'var(--accent)', textDecoration:'none', fontWeight:600 },
 
-  applyToggleRow:   { marginBottom:'20px' },
-  applyToggleLabel: { display:'flex', alignItems:'center', gap:'12px', cursor:'pointer', userSelect:'none' },
-  track:            { position:'relative', width:'40px', height:'22px', borderRadius:'11px', cursor:'pointer', transition:'background 0.2s, box-shadow 0.2s', flexShrink:0 },
-  knob:             { position:'absolute', top:'2px', width:'18px', height:'18px', borderRadius:'50%', background:'#fff', boxShadow:'0 1px 4px rgba(0,0,0,0.3)', transition:'transform 0.2s' },
-  applyToggleText:  { fontSize:'13px', fontWeight:600, color:'var(--text)' },
-  applyWarning:     { marginTop:'8px', padding:'10px 14px', borderRadius:'8px', background:'rgba(245,158,11,0.08)', border:'1px solid rgba(245,158,11,0.2)', color:'#fbbf24', fontSize:'12px', lineHeight:1.5 },
 }

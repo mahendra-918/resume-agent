@@ -29,10 +29,10 @@ class AgentState(TypedDict):
     # ── Platform diagnostics ──────────────────────────────────────────────────
     platform_status: dict[str, PlatformStatus]  # keyed by platform name
 
-    # ── Apply ─────────────────────────────────────────────────────────────────
-    apply_enabled: bool
-    apply_results: list[dict]
-
     # ── Control ───────────────────────────────────────────────────────────────
     dry_run: bool
     max_applications: int
+
+    # ── Output dirs (per-user when auth is enabled) ───────────────────────────
+    packages_base_dir: Optional[str]
+    tailored_base_dir: Optional[str]

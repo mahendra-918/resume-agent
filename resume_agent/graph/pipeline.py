@@ -15,7 +15,6 @@ from resume_agent.nodes.job_searcher import search_jobs_node
 from resume_agent.nodes.job_ranker import rank_jobs_node
 from resume_agent.nodes.resume_tailor import tailor_resume_node
 from resume_agent.nodes.package_generator import generate_package_node
-from resume_agent.nodes.linkedin_applier import apply_linkedin_node
 
 
 async def process_next_job_node(state: AgentState) -> dict:
@@ -142,7 +141,6 @@ def _build_graph(emit: Callable | None = None) -> StateGraph:
         }
     ))
 
-    # ── 7. generate_package ────────────────────────────────────────────────────
     g.add_node("generate_package", _node(
         generate_package_node,
         lambda s, r: {
@@ -152,38 +150,6 @@ def _build_graph(emit: Callable | None = None) -> StateGraph:
             "dir":     r["packages"][-1].output_dir  if r.get("packages") else None,
         }
     ))
-
-    # ── 8. apply_linkedin ─────────────────────────────────────────────────────
-    def _apply_event(s, r):
-        results = r.get("apply_results") or []
-        last = results[-1] if results else {}
-        status  = last.get("status", "skipped")
-        job     = last.get("job_title", "?")
-        company = last.get("company", "?")
-        error   = last.get("error", "")
-
-        if status == "applied":
-            msg = f"✅ Applied → {job} @ {company}"
-        elif not s.get("apply_enabled"):
-            msg = f"Apply disabled — {job} @ {company}"
-        elif error == "Easy Apply not available":
-            msg = f"No Easy Apply — {job} @ {company}"
-        elif error == "No LinkedIn credentials configured":
-            msg = f"⚠ Missing credentials — set LinkedIn email/password in Settings"
-        elif error:
-            msg = f"Apply error — {job} @ {company}: {error}"
-        else:
-            msg = f"Skipped apply — {job} @ {company}"
-
-        return {
-            "type":    status,        # "applied" | "skipped" | "failed"
-            "job":     job,
-            "company": company,
-            "status":  status,
-            "message": msg,
-        }
-
-    g.add_node("apply_linkedin", _node(apply_linkedin_node, _apply_event))
 
     async def _summary_with_emit(state: AgentState) -> dict:
         result = await print_summary_node(state)
@@ -209,8 +175,7 @@ def _build_graph(emit: Callable | None = None) -> StateGraph:
     g.add_conditional_edges("rank_jobs", _has_jobs)
     g.add_edge("process_next_job", "tailor_resume")
     g.add_edge("tailor_resume", "generate_package")
-    g.add_edge("generate_package", "apply_linkedin")
-    g.add_conditional_edges("apply_linkedin", _more_jobs)
+    g.add_conditional_edges("generate_package", _more_jobs)
     g.add_edge("print_summary", END)
 
     return g
@@ -220,9 +185,10 @@ async def run_pipeline(
     resume_path: str,
     dry_run: bool = False,
     max_applications: int = 20,
-    apply_enabled: bool = False,
     run_id: str = "",
     emit: Callable[..., Awaitable[Any]] | None = None,
+    packages_base_dir: str | None = None,
+    tailored_base_dir: str | None = None,
 ) -> dict:
     async def _emit(event: dict) -> None:
         if emit and run_id:
@@ -242,10 +208,10 @@ async def run_pipeline(
         "packages": [],
         "errors": [],
         "platform_status": {},
-        "apply_enabled": apply_enabled,
-        "apply_results": [],
         "dry_run": dry_run,
         "max_applications": max_applications,
+        "packages_base_dir": packages_base_dir,
+        "tailored_base_dir": tailored_base_dir,
     }
 
     graph_builder = _build_graph(emit=_emit)

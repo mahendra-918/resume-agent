@@ -57,6 +57,7 @@ class LinkedInPlatform(BasePlatform):
                 easy_apply=True,
             )
 
+            easy_apply_only = True
             if df is None or df.empty:
                 logger.warning(f"[LinkedIn] easy_apply=True returned 0 — retrying without filter")
                 df = await asyncio.to_thread(
@@ -68,13 +69,14 @@ class LinkedInPlatform(BasePlatform):
                     results_wanted=settings.RESULTS_PER_PLATFORM,
                     job_type="internship" if job_type == JobType.INTERNSHIP else "fulltime",
                 )
+                easy_apply_only = False
             import pandas as pd
             jobs = []
             for _, row in df.iterrows():
                 posted = row.get("date_posted")
                 if pd.isna(posted):
                     posted = None
-                
+
                 jobs.append(Job(
                     title=str(row.get("title", "")),
                     company=str(row.get("company", "")),
@@ -84,6 +86,7 @@ class LinkedInPlatform(BasePlatform):
                     platform=Platform.LINKEDIN,
                     job_type=JobType.INTERNSHIP if job_type == JobType.INTERNSHIP else JobType.FULL_TIME,
                     posted_at=posted,
+                    is_easy_apply=True if easy_apply_only else None,
                 ))
             logger.info(f"[LinkedIn] Found {len(jobs)} jobs")
             return jobs
